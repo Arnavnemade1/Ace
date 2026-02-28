@@ -44,5 +44,18 @@ export const alpaca = {
     // Useful for discovery
     getAssets: async (status = 'active') => {
         return await (alpacaClient as any).getAssets({ status });
+    },
+    // [x] Phase 33: Historical Bars for Technical Analysis
+    getBars: async (symbol: string, start: string, timeframe = '1Day', limit = 100) => {
+        const bars: any[] = [];
+        const resp = alpacaClient.getBarsV2(symbol, {
+            start,
+            timeframe,
+            limit
+        });
+        for await (const b of resp) {
+            bars.push(b);
+        }
+        return bars;
     }
 };
