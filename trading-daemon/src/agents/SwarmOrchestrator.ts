@@ -7,18 +7,11 @@ import { DiscordDispatcher } from './DiscordDispatcher';
 import { logAgentAction } from '../supabase';
 import axios from 'axios';
 
-// ── Dynamic Watchlist ──
-// We start with a large curated list and also fetch the top movers dynamically from Alpaca
 const CORE_SYMBOLS = [
-    // Mega-cap US Equities
     'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'AVGO', 'JPM', 'V',
-    // ETFs & Macro Proxies
     'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'ARKK',
-    // High-volatility / Momentum
     'PLTR', 'COIN', 'HOOD', 'SOFI', 'AMD', 'INTC', 'MU', 'MSTR', 'SMCI', 'ARM',
-    // Healthcare / Defensive
     'UNH', 'JNJ', 'PFE', 'ABBV',
-    // Energy / Commodities
     'XOM', 'CVX', 'OXY',
 ];
 
@@ -32,18 +25,22 @@ export class SwarmOrchestrator {
     private watchlist: string[] = [...CORE_SYMBOLS];
     private isRunning = false;
     private cycleCounter = 0;
-    private discordInterval = 10; // post to Discord every 10 cycles (= 10 mins)
-    private executionInterval = 10; // evaluate + attempt execution every 10 cycles
-
-    // News sentiment collected from OmniScanner cycles
+    private discordInterval = 10;   // Discord brief every 10 minutes
+    private executionInterval = 10; // Execute signals every 10 minutes
     private latestSentiment = 0.5;
 
     async start() {
         this.isRunning = true;
-        await logAgentAction('Orchestrator', 'info', `Swarm Orchestrator Started. Monitoring ${this.watchlist.length} symbols. Discord heartbeat every ${this.discordInterval} mins.`);
+        await logAgentAction('Orchestrator', 'info',
+            `Swarm Orchestrator started. Monitoring ${this.watchlist.length} symbols. Discord interval: ${this.discordInterval} minutes.`
+        );
         await DiscordDispatcher.postUpdate(
-            '🚀 ACE_OS DAEMON BOOT',
-            `System initialized.\n**Watchlist:** ${this.watchlist.length} symbols\n**Execution Window:** Every ${this.executionInterval} mins\n**Market:** ${this.risk.isMarketOpen() ? '✅ OPEN' : '🌙 CLOSED — GTC queue active'}`,
+            'ACE_OS — DAEMON INITIALIZED',
+            [
+                `**Watchlist:** ${this.watchlist.length} symbols`,
+                `**Execution Interval:** Every ${this.executionInterval} minutes`,
+                `**Market Status:** ${this.risk.isMarketOpen() ? 'OPEN' : 'CLOSED — GTC queue active'}`,
+            ].join('\n'),
             5763719
         );
 
@@ -55,20 +52,16 @@ export class SwarmOrchestrator {
                 console.error('Cycle Error:', err);
                 await logAgentAction('Orchestrator', 'error', `Cycle Failed: ${err.message}`);
             }
-
-            console.log('⏳ Waiting 60 seconds...');
+            console.log('Waiting 60 seconds...');
             await new Promise(res => setTimeout(res, 60000));
         }
     }
 
     async stop() {
         this.isRunning = false;
-        await logAgentAction('Orchestrator', 'info', 'Swarm Orchestrator Stopped.');
+        await logAgentAction('Orchestrator', 'info', 'Swarm Orchestrator stopped.');
     }
 
-    /**
-     * Dynamically refresh watchlist by pulling top Alpaca gainers/losers
-     */
     private async refreshWatchlist() {
         try {
             const { data } = await axios.get('https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=20', {
@@ -77,106 +70,117 @@ export class SwarmOrchestrator {
                     'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET || '',
                 }
             });
-
-            const topSymbols: string[] = [
+            const movers: string[] = [
                 ...(data?.gainers?.map((s: any) => s.symbol) || []),
                 ...(data?.losers?.map((s: any) => s.symbol) || []),
             ].filter(Boolean);
-
-            if (topSymbols.length > 0) {
-                // Merge core + movers, deduplicate
-                this.watchlist = [...new Set([...CORE_SYMBOLS, ...topSymbols])];
-                console.log(`[Watchlist] Updated: ${this.watchlist.length} symbols (${topSymbols.length} movers added)`);
-                await logAgentAction('Orchestrator', 'info', `Watchlist refreshed: ${this.watchlist.length} symbols. Movers: ${topSymbols.join(', ')}`);
+            if (movers.length > 0) {
+                this.watchlist = [...new Set([...CORE_SYMBOLS, ...movers])];
+                await logAgentAction('Orchestrator', 'info',
+                    `Watchlist updated: ${this.watchlist.length} symbols. Movers added: ${movers.join(', ')}`
+                );
             }
-        } catch (e) {
-            console.log('[Watchlist] Mover refresh unavailable, using core list.');
+        } catch {
+            // Screener endpoint optional fallback
         }
     }
 
     private async runCycle() {
         const marketOpen = this.risk.isMarketOpen();
-        const nowET = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
-        console.log(`\n--- [${new Date().toISOString()}] Cycle #${this.cycleCounter} | Market: ${marketOpen ? 'OPEN' : 'CLOSED'} | ${this.watchlist.length} symbols ---`);
+        const nowET = new Date().toLocaleString('en-US', {
+            timeZone: 'America/New_York',
+            hour12: true, hour: '2-digit', minute: '2-digit'
+        });
+        console.log(`\n--- Cycle #${this.cycleCounter} | Market: ${marketOpen ? 'OPEN' : 'CLOSED'} | ${this.watchlist.length} symbols | ${new Date().toISOString()} ---`);
 
-        // 0. Refresh watchlist every 10 cycles to pick up hot movers
-        if (this.cycleCounter % 10 === 1) {
-            await this.refreshWatchlist();
-        }
+        // Refresh watchlist every 10 cycles
+        if (this.cycleCounter % 10 === 1) await this.refreshWatchlist();
 
-        // 1. Stream Portfolio
+        // Stream portfolio
         await this.portfolio.streamLiveData();
 
-        // 2. OmniScanner — pass symbol subset (first 10 to stay within API limits)
-        const scanSymbols = this.watchlist.slice(0, 10);
-        await this.omni.scanAll(scanSymbols);
+        // OmniScanner — scan all watchlist symbols in batches of 10
+        const BATCH = 10;
+        for (let i = 0; i < this.watchlist.length; i += BATCH) {
+            await this.omni.scanAll(this.watchlist.slice(i, i + BATCH));
+        }
 
-        // 3. Macro Intel from last runs
+        // Macro intel
         const macroIntel = { newsSentiment: this.latestSentiment, weatherRisk: 0.2 };
 
-        // 4. Evaluate Strategy on FULL watchlist
+        // Strategy evaluation across full watchlist
         const signals = await this.strategy.evaluate(this.watchlist, macroIntel);
 
-        // 5. Execute / Queue every executionInterval cycles
+        // Execute top signals every executionInterval cycles
         let executionResult: any = null;
         if (this.cycleCounter % this.executionInterval === 0 && signals.length > 0) {
-            const topSignals = signals
-                .sort((a, b) => b.strength - a.strength)
-                .slice(0, 5); // Execute top 5 strongest signals
-
+            const topSignals = signals.sort((a, b) => b.strength - a.strength).slice(0, 5);
             await logAgentAction('Risk Controller', 'decision',
-                `Execution window reached. Processing top ${topSignals.length} signals. Market: ${marketOpen ? 'OPEN' : 'CLOSED'}`
+                `Execution window reached. Top ${topSignals.length} signals. Market: ${marketOpen ? 'OPEN' : 'CLOSED'}`
             );
             executionResult = await this.risk.executeSignals(topSignals, marketOpen);
         } else if (signals.length > 0) {
             const remaining = this.executionInterval - (this.cycleCounter % this.executionInterval);
             await logAgentAction('Risk Controller', 'info',
-                `${signals.length} signals pending. Next execution window in ${remaining} min(s).`
+                `${signals.length} signals pending. Next execution in ${remaining} minute(s).`
             );
         } else {
             await logAgentAction('Risk Controller', 'info', `No actionable signals. Monitoring ${this.watchlist.length} symbols.`);
         }
 
-        // 6. Discord Heartbeat — every 10 cycles
+        // Discord brief every 10 cycles
         if (this.cycleCounter % this.discordInterval === 0) {
-            await this.postRichDiscordUpdate(signals, executionResult, marketOpen, nowET);
+            await this.postDiscordBrief(signals, executionResult, marketOpen, nowET);
         }
 
-        console.log(`--- Cycle #${this.cycleCounter} Complete ---`);
+        console.log(`--- Cycle #${this.cycleCounter} complete ---`);
     }
 
-    private async postRichDiscordUpdate(signals: any[], executionResult: any, marketOpen: boolean, nowET: string) {
-        const topSignals = signals.sort((a, b) => b.strength - a.strength).slice(0, 5);
+    private async postDiscordBrief(signals: any[], executionResult: any, marketOpen: boolean, nowET: string) {
+        const topSignals = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 8);
 
-        const signalLines = topSignals.length > 0
-            ? topSignals.map(s =>
-                `> \`${s.signal_type === 'BUY' ? '🟢' : '🔴'} ${s.symbol}\` — $${(s.metadata.price_observed || 0).toFixed(2)} | Δ${(s.metadata.price_change_pct || 0).toFixed(2)}% | strength \`${s.strength}\``
-            ).join('\n')
-            : '> No high-conviction signals this window.';
+        const signalRows = topSignals.length > 0
+            ? topSignals.map(s => {
+                const dir = s.signal_type === 'BUY' ? 'BUY ' : 'SELL';
+                const price = (s.metadata.price_observed || 0).toFixed(2).padStart(10);
+                const delta = ((s.metadata.price_change_pct || 0) >= 0 ? '+' : '')
+                    + (s.metadata.price_change_pct || 0).toFixed(2) + '%';
+                return `  ${dir}  ${s.symbol.padEnd(8)} ${price}  ${delta.padStart(8)}  ${s.strength}`;
+            }).join('\n')
+            : '  No high-conviction signals this window.';
 
-        const execLines = executionResult
+        const orderRows = executionResult
             ? [
-                ...(executionResult.executed || []).map((e: any) => `> ✅ EXECUTED: **${e.signal_type} ${e.symbol}** x${e.qty} @ ~$${(e.metadata.price_observed || 0).toFixed(2)}`),
-                ...(executionResult.queued || []).map((q: any) => `> 🌙 QUEUED (GTC): **${q.signal_type} ${q.symbol}** x${q.qty} @ $${(q.limit_price || 0).toFixed(2)}`),
-            ].join('\n') || '> No orders this window.'
-            : '> Execution window not reached yet.';
+                ...(executionResult.executed || []).map((e: any) =>
+                    `  EXECUTED  ${e.signal_type.padEnd(4)} ${e.symbol.padEnd(8)} x${String(e.qty).padStart(4)}  @ $${(e.metadata.price_observed || 0).toFixed(2)}`
+                ),
+                ...(executionResult.queued || []).map((q: any) =>
+                    `  QUEUED    ${q.signal_type.padEnd(4)} ${q.symbol.padEnd(8)} x${String(q.qty).padStart(4)}  limit $${(q.limit_price || 0).toFixed(2)}  (GTC)`
+                ),
+            ].join('\n') || '  No orders placed this window.'
+            : '  Execution window not reached.';
+
+        const nextExec = this.executionInterval - (this.cycleCounter % this.executionInterval);
 
         await DiscordDispatcher.postUpdate(
-            `📊 ACE_OS — 10-MIN INTELLIGENCE BRIEF`,
+            'ACE_OS — INTELLIGENCE BRIEF',
             [
-                `**🕐 Time:** ${nowET} ET  |  **Market:** ${marketOpen ? '✅ OPEN' : '🌙 CLOSED'}`,
-                `**📡 Scanning:** ${this.watchlist.length} symbols`,
-                `**🔬 Signals Found:** ${signals.length}`,
+                `**Time:** ${nowET} ET     **Market:** ${marketOpen ? 'OPEN' : 'CLOSED'}     **Cycle:** ${this.cycleCounter}`,
+                `**Symbols Scanned:** ${this.watchlist.length}     **Signals Generated:** ${signals.length}     **Sentiment:** ${this.latestSentiment.toFixed(3)}`,
                 '',
-                '**📈 Top Signals This Window:**',
-                signalLines,
-                '',
-                '**⚡ Execution:**',
-                execLines,
-                '',
-                `**💡 Sentiment Index:** ${this.latestSentiment.toFixed(2)} | **Next Exec Window:** T-${this.executionInterval - (this.cycleCounter % this.executionInterval)} min`,
+                '**Top Signals**',
+                '```',
+                '  SIDE  SYMBOL          PRICE      DELTA  STRENGTH',
+                '  ----  ------    -----------  ---------  --------',
+                signalRows,
+                '```',
+                '**Orders**',
+                '```',
+                orderRows,
+                '```',
+                `Next execution window in ${nextExec} minute(s).`,
             ].join('\n'),
-            marketOpen ? 3066993 : 9807270 // green if open, grey if closed
+            marketOpen ? 3066993 : 9807270
         );
     }
 }
