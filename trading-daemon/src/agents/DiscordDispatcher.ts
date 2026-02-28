@@ -1,12 +1,11 @@
 import axios from 'axios';
 
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-
 export class DiscordDispatcher {
     /**
      * Send a general intelligence or system status update
      */
     static async postUpdate(title: string, description: string, color: number = 3447003) {
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
 
         try {
@@ -28,6 +27,7 @@ export class DiscordDispatcher {
      * Send a high-priority trade execution alert
      */
     static async postTradeAlert(symbol: string, action: 'BUY' | 'SELL', qty: number, price: number, reasoning: string) {
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
 
         const isBuy = action === 'BUY';
