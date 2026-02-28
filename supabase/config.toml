@@ -1,1 +1,25 @@
 project_id = "bmpmvzovovngvbrnkacr"
+
+[functions.orchestrator]
+verify_jwt = false
+
+[functions.market-scanner]
+verify_jwt = false
+
+[functions.strategy-engine]
+verify_jwt = false
+
+[functions.risk-controller]
+verify_jwt = false
+
+[functions.execution-agent]
+verify_jwt = false
+
+[functions.sentiment-analyst]
+verify_jwt = false
+
+[functions.causal-replay]
+verify_jwt = false
+
+[functions.portfolio-optimizer]
+verify_jwt = false
