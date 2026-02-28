@@ -1,4 +1,4 @@
-import Alpaca from '@alpacahq/alpaca-trade-api';
+import axios from 'axios';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -10,9 +10,26 @@ if (!API_KEY || !API_SECRET) {
     throw new Error('Alpaca credentials missing');
 }
 
-export const alpaca = new Alpaca({
-    keyId: API_KEY,
-    secretKey: API_SECRET,
-    paper: true,
-    usePolygon: false
+const alpacaApi = axios.create({
+    baseURL: `${BASE_URL}/v2`,
+    headers: {
+        'APCA-API-KEY-ID': API_KEY,
+        'APCA-API-SECRET-KEY': API_SECRET,
+        'Content-Type': 'application/json'
+    }
 });
+
+export const alpaca = {
+    getAccount: async () => {
+        const { data } = await alpacaApi.get('/account');
+        return data;
+    },
+    getPositions: async () => {
+        const { data } = await alpacaApi.get('/positions');
+        return data as any[];
+    },
+    createOrder: async (orderParams: any) => {
+        const { data } = await alpacaApi.post('/orders', orderParams);
+        return data;
+    }
+};

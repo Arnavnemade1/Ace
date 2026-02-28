@@ -1,5 +1,5 @@
-import { supabase, logAgentAction } from './supabase';
-import { alpaca } from './alpaca';
+import { supabase, logAgentAction } from '../supabase';
+import { alpaca } from '../alpaca';
 
 export class PortfolioStreamer {
     async streamLiveData() {
@@ -12,7 +12,7 @@ export class PortfolioStreamer {
             const portfolioState = {
                 total_value: parseFloat(account.portfolio_value),
                 cash: parseFloat(account.cash),
-                positions: positions.map(p => ({
+                positions: positions.map((p: any) => ({
                     symbol: p.symbol,
                     qty: parseFloat(p.qty),
                     current_price: parseFloat(p.current_price),
