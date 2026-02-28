@@ -3,7 +3,7 @@ import { logAgentAction, supabase } from '../supabase';
 
 const ALPACA_BASE = 'https://data.alpaca.markets/v2';
 const ALPACA_KEY = process.env.ALPACA_API_KEY;
-const ALPACA_SECRET = process.env.ALPACA_API_SECRET;
+const ALPACA_SECRET = process.env.ALPACA_SECRET_KEY;  // matches .env
 
 const alpacaHeaders = {
     'APCA-API-KEY-ID': ALPACA_KEY || '',
