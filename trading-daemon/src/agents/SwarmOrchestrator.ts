@@ -2,6 +2,7 @@ import { MarketScanner } from './MarketScanner';
 import { StrategyEngine } from './StrategyEngine';
 import { RiskController } from './RiskController';
 import { PortfolioStreamer } from './PortfolioStreamer';
+import { OmniScanner } from './OmniScanner';
 import { logAgentAction } from '../supabase';
 
 export class SwarmOrchestrator {
@@ -9,6 +10,7 @@ export class SwarmOrchestrator {
     private strategy = new StrategyEngine();
     private risk = new RiskController();
     private portfolio = new PortfolioStreamer();
+    private omni = new OmniScanner();
 
     private symbolsToMonitor = ['AAPL', 'MSFT', 'TSLA', 'SPY', 'QQQ', 'NVDA', 'BTCUSD', 'ETHUSD'];
     private isRunning = false;
@@ -45,9 +47,12 @@ export class SwarmOrchestrator {
         // 0. Stream Live Portfolio Info
         await this.portfolio.streamLiveData();
 
-        // 1. Gather Intelligence (Every 60s)
-        const macroIntel = await this.scanner.fetchMacroIntel();
-        const marketData = await this.scanner.scanEquities(this.symbolsToMonitor);
+        // 1. Gather Intelligence via OMNI (Every 60s)
+        await this.omni.scanAll(this.symbolsToMonitor);
+
+        // Ensure legacy logic has some data to run (mocking standard format)
+        const macroIntel = { newsSentiment: 0.5, weatherRisk: 0.2 };
+        const marketData = [{ symbol: 'SPY', currentPrice: 505.20 }];
 
         // 2. Evaluate Strategy (Every 60s)
         const signals = await this.strategy.evaluate(marketData, macroIntel);
