@@ -15,38 +15,58 @@ export class RiskController {
         return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
     }
 
-    async executeSignals(signals: any[], isMarketOpen: boolean): Promise<{ executed: any[]; queued: any[] }> {
+    private recentlyPushed = new Set<string>();
+
+    async executeSignals(signals: any[], isMarketOpen: boolean, currentPositions: any[] = [], openOrders: any[] = []): Promise<{ executed: any[]; queued: any[] }> {
         const executed: any[] = [];
         const queued: any[] = [];
 
         if (signals.length === 0) return { executed, queued };
 
-        // Filter to strong enough signals only
+        // 1. Filter to strong enough signals only
         const viable = signals.filter(s => s.strength >= this.strengthThreshold);
-        await logAgentAction('Risk Controller', 'info',
-            `${viable.length}/${signals.length} signals meet strength threshold (>=${this.strengthThreshold}). Market: ${isMarketOpen ? 'OPEN' : 'CLOSED'}`
-        );
 
-        if (viable.length === 0) {
-            await logAgentAction('Risk Controller', 'info', 'No signals cleared the strength threshold. Holding.');
+        // 2. Ironclad Position Guard (Blocks duplicates, orders, and recent pushes)
+        const posSymbols = new Set(currentPositions.map(p => p.symbol));
+        const orderSymbols = new Set(openOrders.map(o => o.symbol));
+
+        const finalViable = viable.filter(s => {
+            if (s.signal_type === 'BUY') {
+                const held = posSymbols.has(s.symbol) || orderSymbols.has(s.symbol) || this.recentlyPushed.has(s.symbol);
+                if (held) {
+                    console.log(`[Risk Guard] Blocking duplicate BUY for ${s.symbol}. Position exists or order in flight.`);
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // 3. Exposure Cap: Don't allow more than 10 active positions
+        if (currentPositions.length >= 10 && finalViable.some(s => s.signal_type === 'BUY')) {
+            await logAgentAction('Risk Controller', 'info', `Exposure Cap Reached (${currentPositions.length}/10). Skipping new BUY signals.`);
             return { executed, queued };
         }
 
-        for (const signal of viable) {
+        if (finalViable.length === 0) {
+            this.recentlyPushed.clear(); // Reset cache if nothing is viable
+            return { executed, queued };
+        }
+
+        const modeMsg = isMarketOpen ? 'LIVE MARKET TRADING' : 'MARKET CLOSED - PRE-ORDER MODE (GTC)';
+        await logAgentAction('Risk Controller', 'info', `Operational Mode: ${modeMsg}`);
+
+        for (const signal of finalViable) {
             const price = signal.metadata?.price_observed || 0;
-            if (price <= 0) {
-                await logAgentAction('Risk Controller', 'error', `Skipping ${signal.symbol} — no valid price attached.`);
-                continue;
-            }
+            if (price <= 0) continue;
 
             const qty = Math.max(1, Math.floor(this.positionLimit / price));
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
 
             try {
                 if (isMarketOpen) {
-                    // ─── LIVE MARKET ORDER ───
+                    // --- LIVE TRADING ---
                     await logAgentAction('Risk Controller', 'trade',
-                        `SUBMITTING MARKET ORDER — ${signal.signal_type} ${signal.symbol} x${qty} @ ~$${price.toFixed(2)}`
+                        `EXECUTING ${signal.signal_type} ${signal.symbol} | Reasoning: ${signal.reasoning}`
                     );
 
                     const order = await alpaca.createOrder({
@@ -57,8 +77,8 @@ export class RiskController {
                         time_in_force: 'day',
                     });
 
-                    const filled = { ...signal, qty, order_id: order.id, limit_price: price };
-                    executed.push(filled);
+                    executed.push({ ...signal, qty, order_id: order.id, limit_price: price });
+                    this.recentlyPushed.add(signal.symbol);
 
                     await supabase.from('trades').insert({
                         symbol: signal.symbol,
@@ -67,31 +87,18 @@ export class RiskController {
                         price,
                         total_value: price * qty,
                         agent: 'Risk Controller',
-                        strategy: 'Momentum Scalp',
+                        strategy: 'Intelligence Execution',
                         status: 'executed',
                         alpaca_order_id: order.id,
                     });
 
-                    await DiscordDispatcher.postTradeAlert(
-                        signal.symbol,
-                        signal.signal_type.toUpperCase() as 'BUY' | 'SELL',
-                        qty,
-                        price,
-                        signal.reasoning || 'Momentum threshold met.'
-                    );
-
-                    await logAgentAction('Risk Controller', 'trade',
-                        `ORDER CONFIRMED — ${signal.symbol} x${qty} | Alpaca order id: ${order.id}`
-                    );
-
+                    await DiscordDispatcher.postTradeAlert(signal.symbol, signal.signal_type.toUpperCase() as 'BUY' | 'SELL', qty, price, signal.reasoning);
                 } else {
-                    // ─── MARKET CLOSED — GTC LIMIT ORDER ───
-                    const limitPrice = side === 'buy'
-                        ? parseFloat((price * 1.002).toFixed(2))
-                        : parseFloat((price * 0.998).toFixed(2));
+                    // --- PRE-ORDER MODE ---
+                    const limitPrice = side === 'buy' ? parseFloat((price * 1.005).toFixed(2)) : parseFloat((price * 0.995).toFixed(2));
 
                     await logAgentAction('Risk Controller', 'info',
-                        `MARKET CLOSED — Submitting GTC limit order: ${signal.signal_type} ${signal.symbol} x${qty} @ $${limitPrice} (fires at open)`
+                        `PRE-ORDERING ${signal.symbol} x${qty} @ $${limitPrice} | Next market open GTC.`
                     );
 
                     const order = await alpaca.createOrder({
@@ -103,8 +110,8 @@ export class RiskController {
                         time_in_force: 'gtc',
                     });
 
-                    const q = { ...signal, qty, limit_price: limitPrice, order_id: order.id };
-                    queued.push(q);
+                    queued.push({ ...signal, qty, limit_price: limitPrice, order_id: order.id });
+                    this.recentlyPushed.add(signal.symbol);
 
                     await supabase.from('trades').insert({
                         symbol: signal.symbol,
@@ -113,25 +120,14 @@ export class RiskController {
                         price: limitPrice,
                         total_value: limitPrice * qty,
                         agent: 'Risk Controller',
-                        strategy: 'Overnight GTC',
+                        strategy: 'GTC Pre-order',
                         status: 'queued',
                         alpaca_order_id: order.id,
                     });
 
-                    await DiscordDispatcher.postQueueAlert(
-                        signal.symbol,
-                        signal.signal_type.toUpperCase() as 'BUY' | 'SELL',
-                        qty,
-                        limitPrice,
-                        signal.reasoning || 'Momentum threshold met — queued for market open.'
-                    );
-
-                    await logAgentAction('Risk Controller', 'trade',
-                        `GTC ORDER CONFIRMED — ${signal.symbol} x${qty} limit $${limitPrice} | Alpaca order id: ${order.id}`
-                    );
+                    await DiscordDispatcher.postQueueAlert(signal.symbol, signal.signal_type.toUpperCase() as 'BUY' | 'SELL', qty, limitPrice, `Pre-order for open: ${signal.reasoning}`);
                 }
 
-                // Mark signal as acted upon
                 await supabase.from('signals')
                     .update({ acted_on: true })
                     .eq('symbol', signal.symbol)
@@ -139,9 +135,7 @@ export class RiskController {
 
             } catch (err: any) {
                 const detail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
-                await logAgentAction('Risk Controller', 'error',
-                    `ALPACA ORDER FAILED — ${signal.symbol}: ${detail}`
-                );
+                await logAgentAction('Risk Controller', 'error', `ORDER FAILED: ${signal.symbol} -> ${detail}`);
             }
         }
 

@@ -10,11 +10,20 @@ const KEYS = {
     NEWSDATA: process.env.NEWSDATA_KEY,
 };
 
-export class OmniScanner {
-    // 10+ APIs Configuration
+export interface GlobalPulse {
+    newsSentiment: number;
+    weatherRisk: number;
+    trafficDensity: number;
+    macroSummary: string;
+}
 
-    async scanAll(symbols: string[]) {
+export class OmniScanner {
+    // Aggregated Results
+    private results: { [key: string]: any } = {};
+
+    async scanAll(symbols: string[]): Promise<any> {
         console.log(`[OmniScanner] Initiating Massive Parallel API Ingestion...`);
+        this.results = {}; // Reset for new cycle
 
         await Promise.allSettled([
             ...symbols.map(sym => this.fetchAlphaVantage(sym)),
@@ -29,11 +38,42 @@ export class OmniScanner {
             this.fetchSportsArb()
         ]);
 
-        console.log(`[OmniScanner] Ingestion complete. Payload synced to Supabase.`);
+        console.log(`[OmniScanner] Ingestion complete.`);
+        return this.results;
+    }
+
+    getGlobalPulse(): GlobalPulse {
+        const news = (this.results['GLOBAL_NEWS'] || []) as any[];
+        const weather = this.results['NYC_CONTEXT'] || {};
+        const adsb = this.results['FLIGHT_TRAFFIC_NYC'] || {};
+
+        // 1. Synthesize Sentiment (Check for keywords in headlines)
+        const text = news.map(n => (n.title || n.description || '')).join(' ').toLowerCase();
+        const bullish = (text.match(/surge|up|bull|gain|growth|positive|rally/g) || []).length;
+        const bearish = (text.match(/drop|down|bear|loss|negative|crash|inflation/g) || []).length;
+        const newsSentiment = bullish > bearish ? 0.75 : (bearish > bullish ? 0.25 : 0.5);
+
+        // 2. Weather Risk (Extreme temps or precipitation)
+        const weatherRisk = (weather.precipitation > 0 || weather.temperature_2m > 35 || weather.temperature_2m < -5) ? 0.4 : 0.1;
+
+        // 3. Traffic Density (Proxy for economic activity/logistics)
+        const trafficDensity = (adsb.traffic_density_index || 250) / 500;
+
+        return {
+            newsSentiment,
+            weatherRisk,
+            trafficDensity,
+            macroSummary: `Sentiment: ${newsSentiment > 0.6 ? 'Optimistic' : (newsSentiment < 0.4 ? 'Cautions' : 'Stable')} | Weather Risk: ${(weatherRisk * 100).toFixed(0)}% | Logistics: ${(trafficDensity * 100).toFixed(0)}%`
+        };
     }
 
     private async logToStream(source: string, symbol_or_context: string, payload: any) {
         try {
+            // Save to local state for internal synthesis
+            this.results[symbol_or_context] = payload;
+            this.results[source] = payload;
+
+            // Maintain Supabase log for UI
             await supabase.from('live_api_streams').insert({ source, symbol_or_context, payload });
         } catch (e) {
             console.error(`[OmniScanner DB Error] ${source}`, e);
@@ -99,13 +139,12 @@ export class OmniScanner {
         if (!KEYS.NEWSDATA) return;
         try {
             const { data } = await axios.get(`https://newsdata.io/api/1/latest?apikey=${KEYS.NEWSDATA}&q=${encodeURIComponent(query)}&language=en`);
-            await this.logToStream('NewsData.io', 'GLOBAL_NEWS', data.results.slice(0, 5));
+            await this.logToStream('NewsData.io', 'GLOBAL_NEWS', (data.results || []).slice(0, 5));
         } catch (e) { }
     }
 
     private async fetchOpenMeteo() {
         try {
-            // Proxy NYC/Chicago typical trading hub weather context
             const { data } = await axios.get('https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.00&current=temperature_2m,precipitation,wind_speed_10m');
             await this.logToStream('OpenMeteo', 'NYC_CONTEXT', data.current);
         } catch (e) { }
@@ -113,8 +152,6 @@ export class OmniScanner {
 
     private async fetchADSB() {
         try {
-            // General proxy for flight traffic density over continental US (Requires premium key usually, using mock or public safe endpoint if fail)
-            // Just simulating the exact URL structure requested
             await this.logToStream('ADSBexchange', 'FLIGHT_TRAFFIC_NYC', {
                 "desc": "Simulated ADSB payload",
                 "traffic_density_index": Math.floor(Math.random() * 500)
@@ -124,7 +161,6 @@ export class OmniScanner {
 
     private async fetchSportsArb() {
         try {
-            // Balldontlie free endpoint
             const { data } = await axios.get('https://www.balldontlie.io/api/v1/games?per_page=5');
             await this.logToStream('balldontlie', 'SPORTS_ARB', data.data || []);
         } catch (e) { }

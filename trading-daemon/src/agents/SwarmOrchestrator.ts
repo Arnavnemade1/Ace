@@ -97,50 +97,58 @@ export class SwarmOrchestrator {
         });
         console.log(`\n--- Cycle #${this.cycleCounter} | Market: ${marketOpen ? 'OPEN' : 'CLOSED'} | ${this.watchlist.length} symbols | ${new Date().toISOString()} ---`);
 
-        // Refresh watchlist every 10 cycles
+        // 1. Refresh watchlist & Fetch Portfolio state
         if (this.cycleCounter % 10 === 1) await this.refreshWatchlist();
-
-        // Stream portfolio
         await this.portfolio.streamLiveData();
 
-        // OmniScanner — scan all watchlist symbols in batches of 10
+        // 2. Fetch current active positions and open orders from Alpaca
+        const [positions, openOrders] = await Promise.all([
+            axios.get('https://paper-api.alpaca.markets/v2/positions', { headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY } }).then(r => r.data).catch(() => []),
+            axios.get('https://paper-api.alpaca.markets/v2/orders?status=open', { headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY } }).then(r => r.data).catch(() => [])
+        ]);
+
+        const activeSymbols = new Set([
+            ...positions.map((p: any) => p.symbol),
+            ...openOrders.map((o: any) => o.symbol)
+        ]);
+
+        // 3. OmniScanner — scan all watchlist symbols and synthesize Global Pulse
         const BATCH = 10;
         for (let i = 0; i < this.watchlist.length; i += BATCH) {
             await this.omni.scanAll(this.watchlist.slice(i, i + BATCH));
         }
+        const pulse = this.omni.getGlobalPulse();
+        await logAgentAction('Orchestrator', 'info', 'Market Pulse Synthesized', pulse.macroSummary);
 
-        // Macro intel
-        const macroIntel = { newsSentiment: this.latestSentiment, weatherRisk: 0.2 };
+        // 4. Strategy evaluation with full Market Pulse and Position Awareness
+        const signals = await this.strategy.evaluate(this.watchlist, pulse, activeSymbols);
 
-        // Strategy evaluation across full watchlist
-        const signals = await this.strategy.evaluate(this.watchlist, macroIntel);
-
-        // Execute top signals every executionInterval cycles
+        // 5. Execute top signals every executionInterval cycles with extra Risk Guardrails
         let executionResult: any = null;
         if (this.cycleCounter % this.executionInterval === 0 && signals.length > 0) {
             const topSignals = signals.sort((a, b) => b.strength - a.strength).slice(0, 5);
             await logAgentAction('Risk Controller', 'decision',
-                `Execution window reached. Top ${topSignals.length} signals. Market: ${marketOpen ? 'OPEN' : 'CLOSED'}`
+                `Execution window reached. Pulse: ${pulse.newsSentiment.toFixed(2)} | Active Positions: ${activeSymbols.size}`
             );
-            executionResult = await this.risk.executeSignals(topSignals, marketOpen);
+            executionResult = await this.risk.executeSignals(topSignals, marketOpen, positions, openOrders);
         } else if (signals.length > 0) {
             const remaining = this.executionInterval - (this.cycleCounter % this.executionInterval);
             await logAgentAction('Risk Controller', 'info',
-                `${signals.length} signals pending. Next execution in ${remaining} minute(s).`
+                `${signals.length} signals pending. Market Consensus: ${pulse.macroSummary}. Next execution in ${remaining}m.`
             );
         } else {
-            await logAgentAction('Risk Controller', 'info', `No actionable signals. Monitoring ${this.watchlist.length} symbols.`);
+            await logAgentAction('Risk Controller', 'info', `No actionable signals. Global Sentiment: ${pulse.newsSentiment.toFixed(2)}.`);
         }
 
-        // Discord brief every 10 cycles (10 minutes)
+        // 6. Discord brief every 10 cycles (10 minutes)
         if (this.cycleCounter % this.discordInterval === 0) {
-            await this.postDiscordBrief(signals, executionResult, marketOpen, nowET);
+            await this.postDiscordBrief(signals, executionResult, marketOpen, nowET, pulse);
         }
 
         console.log(`--- Cycle #${this.cycleCounter} complete ---`);
     }
 
-    private async postDiscordBrief(signals: any[], executionResult: any, marketOpen: boolean, nowET: string) {
+    private async postDiscordBrief(signals: any[], executionResult: any, marketOpen: boolean, nowET: string, pulse: any) {
         const topSignals = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 10);
 
         const signalRows = topSignals.length > 0
@@ -170,6 +178,8 @@ export class SwarmOrchestrator {
                 `**Status:** ${marketOpen ? 'TRADING ACTIVE' : 'AWAITING HORIZON (Span Penalty Active)'}`,
                 '',
                 '**Intelligence Analysis**',
+                `> **Global Pulse:** ${pulse.macroSummary}`,
+                `> **News Sentiment:** ${(pulse.newsSentiment * 100).toFixed(0)}%`,
                 '```',
                 signalRows,
                 '```',
