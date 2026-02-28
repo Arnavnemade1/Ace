@@ -77,8 +77,8 @@ const HeroSection = () => {
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
             className="text-center group"
           >
-            <h1 className="text-[120px] md:text-[200px] font-display font-black tracking-[-0.08em] leading-[0.75] select-none">
-              <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow pb-4 block">
+            <h1 className="text-[140px] md:text-[240px] font-display font-black tracking-[-0.1em] leading-[0.7] select-none">
+              <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow pb-8 block filter drop-shadow-[0_0_30px_rgba(139,92,246,0.2)]">
                 ACE
               </span>
             </h1>
@@ -87,14 +87,13 @@ const HeroSection = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.6, duration: 1 }}
-              className="mt-12 space-y-6"
+              className="mt-16 space-y-6"
             >
-              <h2 className="text-2xl md:text-4xl font-display font-light tracking-tight text-white/90">
-                The Autonomous <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#0ea5e9] to-[#00ff41] font-medium font-serif italic">Capital</span> Engine
+              <h2 className="text-2xl md:text-3xl font-display font-extralight tracking-[0.2em] uppercase text-white/90">
+                Autonomous <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#0ea5e9] to-[#00ff41] font-medium italic">Capital</span> Intelligence
               </h2>
-              <p className="text-sm md:text-lg text-white/30 max-w-2xl mx-auto font-light leading-relaxed tracking-wide">
-                Specialized neural architecture coordinating macro proxies and
-                equities frontiers with absolute zero human intervention.
+              <p className="text-[10px] md:text-xs text-white/20 max-w-xl mx-auto font-mono leading-relaxed tracking-[0.3em] uppercase">
+                Specialized neural architecture // absolute zero human oversight
               </p>
             </motion.div>
           </motion.div>
@@ -104,71 +103,61 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9 }}
-            className="w-full max-w-3xl mt-24 mb-20 border-y border-white/5 py-8"
+            className="w-full max-w-4xl mt-32 mb-24 border-y border-white/[0.03] py-10"
           >
-            <div className="flex flex-wrap items-center justify-between gap-y-8 gap-x-12 px-2">
-              <div className="space-y-1.5 flex-1 min-w-[140px]">
-                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]" />
+            <div className="grid grid-cols-2 md:grid-cols-4 items-center justify-between gap-y-10 gap-x-16 px-4">
+              <div className="space-y-2">
+                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
+                  <span className="w-1 h-1 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]" />
                   Liquidity
                 </div>
-                <div className="text-xl font-display font-bold text-white tracking-tight">{displayValue}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tighter">{displayValue}</div>
               </div>
 
-              <div className="space-y-1.5 flex-1 min-w-[140px]">
-                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2">
+              <div className="space-y-2">
+                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
                   <ShieldCheck className="w-3 h-3 text-[#0ea5e9]" />
                   Operations
                 </div>
-                <div className="text-xl font-display font-bold text-white tracking-tight">{positionDisplay}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tighter">{positionDisplay}</div>
               </div>
 
-              <div className="space-y-1.5 flex-1 min-w-[140px]">
-                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2">
+              <div className="space-y-2">
+                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
                   <Activity className="w-3 h-3 text-[#ec4899]" />
                   Sensing
                 </div>
-                <div className="text-xl font-display font-bold text-white tracking-tight">{signalDisplay}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tighter">{signalDisplay}</div>
               </div>
 
-              <div className="space-y-1.5 flex-1 min-w-[140px]">
-                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2">
+              <div className="space-y-2">
+                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
                   <TrendingUp className="w-3 h-3 text-[#f97316]" />
                   Efficiency
                 </div>
-                <div className="text-xl font-display font-bold text-white tracking-tight">98.4%</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tighter">98.4%</div>
               </div>
             </div>
           </motion.div>
 
           {/* Action Interface */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-6 w-full max-w-lg mb-20">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-8 w-full max-w-md mb-24">
             <Link
               to="/analytics"
               className="relative group w-full sm:flex-1 h-14"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-[#8b5cf6] to-[#0ea5e9] opacity-0 group-hover:opacity-10 transition-opacity blur-xl rounded-full" />
-              <div className="relative h-full flex items-center justify-center gap-3 bg-white text-black font-display font-bold text-sm uppercase tracking-[0.2em] hover:scale-[1.02] transition-transform">
-                System Terminal <ArrowRight className="w-4 h-4" />
+              <div className="relative h-full flex items-center justify-center gap-3 bg-white text-black font-display font-black text-[10px] uppercase tracking-[0.3em] hover:scale-[1.02] transition-transform">
+                Enter Terminal
               </div>
             </Link>
             <Link
               to="/arena"
-              className="w-full sm:flex-1 h-14 flex items-center justify-center border border-white/10 text-white font-display font-medium text-sm uppercase tracking-[0.2em] hover:bg-white/[0.03] transition-all"
+              className="w-full sm:flex-1 h-14 flex items-center justify-center border border-white/5 text-white/40 font-display font-black text-[10px] uppercase tracking-[0.3em] hover:bg-white/[0.03] hover:text-white transition-all"
             >
-              Agent Arena
+              Live Arena
             </Link>
           </div>
-
-          {/* Subtle Dynamic Status Bar */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 1.2 }}
-            className="w-full max-w-md pt-8 border-t border-white/[0.03]"
-          >
-            <MarketCountdown />
-          </motion.div>
         </div>
       </motion.div>
 

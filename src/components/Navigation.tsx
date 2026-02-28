@@ -1,49 +1,54 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Eye, Activity, BrainCircuit } from "lucide-react";
+import { LayoutDashboard, Activity, BrainCircuit } from "lucide-react";
 import { motion } from "framer-motion";
 
 const Navigation = () => {
     const location = useLocation();
 
     const links = [
-        { name: "Live Dashboard", path: "/", icon: <LayoutDashboard className="w-4 h-4" /> },
-        { name: "Agent Arena", path: "/arena", icon: <BrainCircuit className="w-4 h-4" /> },
-        { name: "Bloomberg Analytics", path: "/analytics", icon: <Activity className="w-4 h-4" /> },
+        { name: "Terminal", path: "/", icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
+        { name: "Arena", path: "/arena", icon: <BrainCircuit className="w-3.5 h-3.5" /> },
+        { name: "Analytics", path: "/analytics", icon: <Activity className="w-3.5 h-3.5" /> },
     ];
 
     return (
-        <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/20">
-            <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <span className="font-display font-black text-2xl tracking-tighter">ACE</span>
-                </div>
+        <nav className="fixed top-8 left-0 right-0 z-50 flex justify-center pointer-events-none px-6">
+            <motion.div
+                initial={{ y: -20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="pointer-events-auto h-12 bg-black/40 backdrop-blur-2xl border border-white/5 rounded-full px-2 flex items-center gap-1 shadow-2xl"
+            >
+                <Link to="/" className="flex items-center gap-3 px-4 mr-2 group">
+                    <span className="font-display font-black text-xl tracking-[-0.08em] text-white group-hover:scale-105 transition-transform">ACE</span>
+                </Link>
 
-                <div className="flex items-center gap-1 md:gap-4">
+                <div className="h-4 w-px bg-white/10 mx-1" />
+
+                <div className="flex items-center gap-1">
                     {links.map((link) => (
                         <Link
                             key={link.path}
                             to={link.path}
-                            className={`relative px-4 py-2 rounded-md text-sm font-medium transition-colors ${location.pathname === link.path
-                                ? "text-primary"
-                                : "text-muted-foreground hover:text-foreground"
+                            className={`relative px-4 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all ${location.pathname === link.path
+                                ? "text-white"
+                                : "text-white/40 hover:text-white/80"
                                 }`}
                         >
                             <div className="flex items-center gap-2 z-10 relative">
                                 {link.icon}
-                                <span className="hidden md:inline">{link.name}</span>
+                                <span className="hidden sm:inline">{link.name}</span>
                             </div>
                             {location.pathname === link.path && (
                                 <motion.div
-                                    layoutId="navbar-indicator"
-                                    className="absolute inset-0 bg-primary/10 border border-primary/20 rounded-md -z-0"
-                                    initial={false}
-                                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                    layoutId="navbar-pill"
+                                    className="absolute inset-0 bg-white/10 rounded-full -z-0"
+                                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
                                 />
                             )}
                         </Link>
                     ))}
                 </div>
-            </div>
+            </motion.div>
         </nav>
     );
 };

@@ -9,6 +9,8 @@ import AgentArena from "./pages/AgentArena";
 import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
 
+import { FloatingStatusBar } from "./components/FloatingStatusBar";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -18,6 +20,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Navigation />
+        <FloatingStatusBar />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/arena" element={<AgentArena />} />
