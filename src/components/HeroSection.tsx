@@ -70,24 +70,56 @@ const HeroSection = () => {
       <motion.div style={{ opacity, y }} className="relative z-10 container mx-auto px-6 pt-32 pb-20">
         <div className="max-w-6xl mx-auto flex flex-col items-center">
 
-          {/* Logo-Colored Gradient Title */}
+          {/* Iconic Visual Signature */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-            className="text-center group"
+            className="text-center group flex flex-col items-center relative"
           >
-            <h1 className="text-[120px] md:text-[200px] font-['Dancing_Script'] font-bold tracking-normal leading-[1] select-none pb-8">
-              <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow block filter drop-shadow-[0_0_50px_rgba(139,92,246,0.4)]">
-                Ace
-              </span>
-            </h1>
+            <div className="flex items-center justify-center gap-8 md:gap-12 relative">
+              {/* Animated Playing Card (The Ace) */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.5, rotate: -20, x: 50 }}
+                animate={{ opacity: 1, scale: 1, rotate: -12, x: 0 }}
+                transition={{ delay: 0.5, duration: 1, ease: "easeOut" }}
+                whileHover={{ rotate: -5, scale: 1.05, y: -10 }}
+                className="hidden md:flex absolute -left-48 top-1/2 -translate-y-1/2 items-center justify-center"
+              >
+                <div className="w-40 h-56 bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[20px] shadow-2xl relative overflow-hidden flex flex-col items-center justify-center group-hover:border-white/20 transition-colors">
+                  {/* Card Glow */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-[#8b5cf6]/10 via-transparent to-[#00ff41]/5 opacity-50" />
+
+                  {/* Corner Marks */}
+                  <div className="absolute top-4 left-4 flex flex-col items-center font-display font-black text-xl text-white/40">
+                    A
+                    <div className="w-1.5 h-1.5 rotate-45 bg-[#8b5cf6]/40 mt-1" />
+                  </div>
+                  <div className="absolute bottom-4 right-4 flex flex-col items-center font-display font-black text-xl text-white/40 rotate-180">
+                    A
+                    <div className="w-1.5 h-1.5 rotate-45 bg-[#00ff41]/40 mt-1" />
+                  </div>
+
+                  {/* Central Icon */}
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#8b5cf6] to-[#ec4899] blur-2xl opacity-20 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    <Zap className="w-14 h-14 text-white fill-white shadow-[0_0_30px_rgba(255,255,255,0.2)]" />
+                  </div>
+                </div>
+              </motion.div>
+
+              <h1 className="text-[160px] md:text-[320px] font-['Dancing_Script'] font-bold tracking-normal leading-[0.8] select-none py-12">
+                <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow block filter drop-shadow-[0_0_60px_rgba(139,92,246,0.5)]">
+                  Ace
+                </span>
+              </h1>
+            </div>
 
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.6, duration: 1 }}
-              className="mt-16 space-y-6"
+              transition={{ delay: 0.8, duration: 1 }}
+              className="mt-8 space-y-6"
             >
               <h2 className="text-2xl md:text-3xl font-display font-extralight tracking-[0.2em] uppercase text-white/90">
                 Autonomous <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#0ea5e9] to-[#00ff41] font-medium italic">Capital</span> Intelligence
