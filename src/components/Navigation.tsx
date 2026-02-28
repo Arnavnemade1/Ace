@@ -19,7 +19,7 @@ const Navigation = () => {
                 className="pointer-events-auto h-12 bg-black/40 backdrop-blur-2xl border border-white/5 rounded-full px-2 flex items-center gap-1 shadow-2xl"
             >
                 <Link to="/" className="flex items-center gap-3 px-4 mr-2 group">
-                    <span className="font-display font-black text-xl tracking-[0.05em] text-white group-hover:scale-105 transition-transform">ACE</span>
+                    <span className="font-['Dancing_Script'] font-bold text-2xl tracking-normal text-white group-hover:scale-105 transition-transform">Ace</span>
                 </Link>
 
                 <div className="h-4 w-px bg-white/10 mx-1" />

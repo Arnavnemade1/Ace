@@ -77,9 +77,9 @@ const HeroSection = () => {
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
             className="text-center group"
           >
-            <h1 className="text-[140px] md:text-[240px] font-display font-black tracking-[0.05em] leading-[0.7] select-none pb-4">
-              <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow block filter drop-shadow-[0_0_40px_rgba(139,92,246,0.3)]">
-                ACE
+            <h1 className="text-[120px] md:text-[200px] font-['Dancing_Script'] font-bold tracking-normal leading-[1] select-none pb-8">
+              <span className="bg-clip-text text-transparent bg-gradient-to-br from-[#8b5cf6] via-[#ec4899] to-[#00ff41] animate-gradient-slow block filter drop-shadow-[0_0_50px_rgba(139,92,246,0.4)]">
+                Ace
               </span>
             </h1>
 
