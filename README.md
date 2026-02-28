@@ -1,73 +1,29 @@
-# Welcome to your Lovable project
+<img width="1024" height="1536" alt="ChatGPT Image Feb 27, 2026 at 10_38_41 PM" src="https://github.com/user-attachments/assets/8df5e3a7-6872-48f6-a247-744cc83451ee" />
+One-time Setup (10–15 minutes)
+Connect your free Alpaca paper account (generate API keys).
+Set your high-level goals once (e.g., “Primary focus: energy sector, max 8% drawdown, prefer liquid ETFs/futures”).
+Click “Launch Swarm”.
+Daily / Ongoing Use (Zero Touch)
+The system runs completely by itself 24/7.
+Open the dashboard anytime to watch live:
+Scrolling “Mission Control” feed (every agent thought and data pull in real time).
+Animated causal graph updating live.
+Current paper portfolio, P&L, positions, risk metrics.
+Every trade with full traceable explanation (click to see which agents voted what and which data influenced it).
+You can pause/resume the swarm or adjust high-level goals anytime (optional).
+Every morning you get a clean “Nightly Replay Report” showing what the system learned and how it improved.
+That’s it. After launch, you literally just watch it work and improve.
+Core Features (What Makes It Special)
+Fully Autonomous Multi-Agent Swarm 8–12 specialized agents (Data Scout, Energy Analyst, Risk Sentinel, Decision Maker, Executor, etc.) that debate and vote on every decision.
+Live Agent Observatory Real-time streaming of every single step the agents take — the most transparent trading system possible.
+Causal Replay Arena (Breakthrough Feature) Every night it replays the last 24 hours, compares predictions vs actual outcomes, strengthens/weakens causal understanding, and evolves its own reasoning.
+Rich Analytics Dashboard
+Live causal graph visualization
+Agent performance leaderboard
+Signal attribution (which data sources helped most)
+Portfolio heatmaps & drawdown analytics
+Trade history with full reasoning traces
+Replay Arena progress charts (“How much smarter we got this week”)
+Paper Trading Engine Autonomous buy/sell/hold on Alpaca paper account with built-in risk controls.
+Houston/Energy Focus Strong built-in weighting toward energy/commodities using EIA data, Gulf weather, etc.
 
-## Project info
-
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
