@@ -71,7 +71,7 @@ const AgentArena = () => {
                     <p className="text-muted-foreground text-lg">Live multi-agent neural monitoring & API feed processing.</p>
                 </motion.div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
                     <div className="glass-card p-6 flex flex-col justify-center items-center text-center col-span-1 border-primary/20 bg-primary/5">
                         <Database className="w-8 h-8 text-primary mb-3 opacity-80" />
                         <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-1">Live Portfolio Value</p>
@@ -81,11 +81,27 @@ const AgentArena = () => {
                         </div>
                     </div>
 
-                    <div className="glass-card p-6 col-span-1 lg:col-span-2 flex flex-col relative overflow-hidden">
+                    <div className="glass-card p-6 flex flex-col justify-center items-center text-center col-span-1 border-primary/10">
+                        <Terminal className="w-6 h-6 text-primary/60 mb-2" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-tighter font-semibold mb-1">Neural Load</p>
+                        <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                            <motion.div
+                                animate={{ width: ["20%", "45%", "32%", "88%", "15%"] }}
+                                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                                className="h-full bg-primary shadow-[0_0_8px_rgba(56,189,248,0.5)]"
+                            />
+                        </div>
+                        <p className="mt-2 text-xs font-mono text-primary/80 tracking-widest">SYNTHESIZING...</p>
+                    </div>
+
+                    <div className="glass-card p-6 col-span-1 lg:col-span-2 flex flex-col relative overflow-hidden bg-white/[0.02]">
                         <div className="absolute top-0 right-0 p-4 opacity-10"><Wifi className="w-32 h-32" /></div>
                         <div className="flex items-center gap-3 mb-4 z-10">
                             <Activity className="text-primary w-5 h-5" />
-                            <h3 className="font-display font-semibold text-lg">Active Positions ({portfolio?.positions?.length || 0})</h3>
+                            <h3 className="font-display font-semibold text-lg">
+                                Neural Trade Stream ({portfolio?.positions?.length || 0})
+                                {portfolio?.orders?.length > 0 && <span className="ml-3 text-xs font-mono text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{portfolio.orders.length} PENDING</span>}
+                            </h3>
                         </div>
                         <div className="overflow-x-auto z-10">
                             <table className="w-full text-sm text-left">
@@ -93,12 +109,13 @@ const AgentArena = () => {
                                     <tr>
                                         <th className="px-4 py-2 font-medium">Symbol</th>
                                         <th className="px-4 py-2 font-medium">Qty</th>
-                                        <th className="px-4 py-2 font-medium">Current Price</th>
+                                        <th className="px-4 py-2 font-medium">Status / Price</th>
                                         <th className="px-4 py-2 font-medium">Market Value</th>
                                         <th className="px-4 py-2 font-medium text-right">Unrealized P&L</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border/20">
+                                    {/* Active Positions */}
                                     {portfolio?.positions?.map((pos: any, idx: number) => (
                                         <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.05 }} key={pos.symbol} className="hover:bg-secondary/30 transition-colors">
                                             <td className="px-4 py-3 font-semibold font-display text-foreground">{pos.symbol}</td>
@@ -111,6 +128,28 @@ const AgentArena = () => {
                                             </td>
                                         </motion.tr>
                                     ))}
+
+                                    {/* Pending Orders */}
+                                    {portfolio?.orders?.map((ord: any, idx: number) => (
+                                        <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: (portfolio?.positions?.length || 0) * 0.05 + idx * 0.05 }} key={`${ord.symbol}-${ord.status}-${idx}`} className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors opacity-80 italic">
+                                            <td className="px-4 py-3 font-semibold font-display text-amber-500/80">{ord.symbol}</td>
+                                            <td className="px-4 py-3">{ord.qty}</td>
+                                            <td className="px-4 py-3">
+                                                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-amber-500/20 rounded mr-2 border border-amber-500/30">{ord.status}</span>
+                                                {ord.side?.toUpperCase()} @ ${ord.limit_price?.toFixed(2) || 'MKT'}
+                                            </td>
+                                            <td className="px-4 py-3 font-medium opacity-60">${((ord.limit_price || 0) * ord.qty).toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right font-medium text-muted-foreground/50">— PENDING —</td>
+                                        </motion.tr>
+                                    ))}
+
+                                    {(!portfolio?.positions?.length && !portfolio?.orders?.length) && (
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                                                No active positions or pending orders detected.
+                                            </td>
+                                        </tr>
+                                    )}
                                 </tbody>
                             </table>
                         </div>

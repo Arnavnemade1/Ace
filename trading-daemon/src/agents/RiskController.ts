@@ -30,16 +30,27 @@ export class RiskController {
         const posSymbols = new Set(currentPositions.map(p => p.symbol));
         const orderSymbols = new Set(openOrders.map(o => o.symbol));
 
-        const finalViable = viable.filter(s => {
+        const finalViable: any[] = [];
+        for (const s of viable) {
             if (s.signal_type === 'BUY') {
-                const held = posSymbols.has(s.symbol) || orderSymbols.has(s.symbol) || this.recentlyPushed.has(s.symbol);
+                // Persistent check: 24h Supabase lookup + Local cache + Current holdings
+                const tradedRecently = await this.hasTradedRecently(s.symbol, 'BUY');
+                const held = posSymbols.has(s.symbol) || orderSymbols.has(s.symbol) || this.recentlyPushed.has(s.symbol) || tradedRecently;
+
                 if (held) {
-                    console.log(`[Risk Guard] Blocking duplicate BUY for ${s.symbol}. Position exists or order in flight.`);
-                    return false;
+                    console.log(`[Risk Guard] Blocking duplicate BUY for ${s.symbol}. Stock already in portfolio or traded in last 24h.`);
+                    continue;
+                }
+            } else if (s.signal_type === 'SELL') {
+                // Sell-Side Guard: Only sell if we have a position to liquidate
+                const held = posSymbols.has(s.symbol);
+                if (!held) {
+                    console.log(`[Risk Guard] Blocking NAKED SELL for ${s.symbol}. No active position found.`);
+                    continue;
                 }
             }
-            return true;
-        });
+            finalViable.push(s);
+        }
 
         // 3. Exposure Cap: Don't allow more than 10 active positions
         if (currentPositions.length >= 10 && finalViable.some(s => s.signal_type === 'BUY')) {
@@ -48,7 +59,7 @@ export class RiskController {
         }
 
         if (finalViable.length === 0) {
-            this.recentlyPushed.clear(); // Reset cache if nothing is viable
+            // Memory fix: NEVER clear recentlyPushed here. Let it persist for the session.
             return { executed, queued };
         }
 
@@ -140,5 +151,19 @@ export class RiskController {
         }
 
         return { executed, queued };
+    }
+
+    private async hasTradedRecently(symbol: string, side: string): Promise<boolean> {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data, error } = await supabase
+            .from('trades')
+            .select('id')
+            .eq('symbol', symbol)
+            .eq('side', side)
+            .gte('created_at', oneDayAgo)
+            .limit(1);
+
+        if (error) return false;
+        return (data && data.length > 0);
     }
 }

@@ -20,10 +20,15 @@ export interface GlobalPulse {
 export class OmniScanner {
     // Aggregated Results
     private results: { [key: string]: any } = {};
+    private seenNewsTitles = new Set<string>();
 
     async scanAll(symbols: string[]): Promise<any> {
         console.log(`[OmniScanner] Initiating Massive Parallel API Ingestion...`);
         this.results = {}; // Reset for new cycle
+        this.seenNewsTitles.clear();
+
+        // Dynamic News Query based on active stocks
+        const contextQuery = symbols.length > 0 ? `(${symbols.slice(0, 3).join(' OR ')}) AND market` : 'stock market';
 
         await Promise.allSettled([
             ...symbols.map(sym => this.fetchAlphaVantage(sym)),
@@ -31,14 +36,14 @@ export class OmniScanner {
             ...symbols.map(sym => this.fetchMarketStack(sym)),
             ...symbols.map(sym => this.fetchTwelveData(sym)),
             this.fetchCoinGecko(),
-            this.fetchNewsAPI('finance OR market'),
-            this.fetchNewsData('finance OR market OR economy'),
+            this.fetchNewsAPI(contextQuery),
+            this.fetchNewsData(contextQuery),
             this.fetchOpenMeteo(),
             this.fetchADSB(),
             this.fetchSportsArb()
         ]);
 
-        console.log(`[OmniScanner] Ingestion complete.`);
+        console.log(`[OmniScanner] Ingestion complete. Collected ${((this.results['GLOBAL_NEWS'] || []) as any[]).length} fresh news items.`);
         return this.results;
     }
 
@@ -51,7 +56,12 @@ export class OmniScanner {
         const text = news.map(n => (n.title || n.description || '')).join(' ').toLowerCase();
         const bullish = (text.match(/surge|up|bull|gain|growth|positive|rally/g) || []).length;
         const bearish = (text.match(/drop|down|bear|loss|negative|crash|inflation/g) || []).length;
-        const newsSentiment = bullish > bearish ? 0.75 : (bearish > bullish ? 0.25 : 0.5);
+
+        // Sentiment range 0-1 (0.5 neutral)
+        let newsSentiment = 0.5;
+        if (bullish + bearish > 0) {
+            newsSentiment = bullish / (bullish + bearish);
+        }
 
         // 2. Weather Risk (Extreme temps or precipitation)
         const weatherRisk = (weather.precipitation > 0 || weather.temperature_2m > 35 || weather.temperature_2m < -5) ? 0.4 : 0.1;
@@ -69,9 +79,21 @@ export class OmniScanner {
 
     private async logToStream(source: string, symbol_or_context: string, payload: any) {
         try {
-            // Save to local state for internal synthesis
-            this.results[symbol_or_context] = payload;
-            this.results[source] = payload;
+            // News Aggregation Logic
+            if (symbol_or_context === 'GLOBAL_NEWS' && Array.isArray(payload)) {
+                const currentNews = this.results['GLOBAL_NEWS'] || [];
+                // Filter duplicates by title
+                const freshItems = payload.filter(item => {
+                    const title = (item.title || '').trim().toLowerCase();
+                    if (!title || this.seenNewsTitles.has(title)) return false;
+                    this.seenNewsTitles.add(title);
+                    return true;
+                });
+                this.results['GLOBAL_NEWS'] = [...currentNews, ...freshItems];
+            } else {
+                this.results[symbol_or_context] = payload;
+                this.results[source] = payload;
+            }
 
             // Maintain Supabase log for UI
             await supabase.from('live_api_streams').insert({ source, symbol_or_context, payload });
@@ -130,7 +152,8 @@ export class OmniScanner {
     private async fetchNewsAPI(query: string) {
         if (!KEYS.NEWSAPI) return;
         try {
-            const { data } = await axios.get(`https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&apiKey=${KEYS.NEWSAPI}&pageSize=5`);
+            // sortBy=publishedAt ensures we get the LATEST news, not just "relevant" old news.
+            const { data } = await axios.get(`https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&apiKey=${KEYS.NEWSAPI}&pageSize=10&sortBy=publishedAt&language=en`);
             await this.logToStream('NewsAPI', 'GLOBAL_NEWS', data.articles);
         } catch (e) { }
     }
@@ -139,7 +162,7 @@ export class OmniScanner {
         if (!KEYS.NEWSDATA) return;
         try {
             const { data } = await axios.get(`https://newsdata.io/api/1/latest?apikey=${KEYS.NEWSDATA}&q=${encodeURIComponent(query)}&language=en`);
-            await this.logToStream('NewsData.io', 'GLOBAL_NEWS', (data.results || []).slice(0, 5));
+            await this.logToStream('NewsData.io', 'GLOBAL_NEWS', (data.results || []).slice(0, 10));
         } catch (e) { }
     }
 

@@ -8,6 +8,7 @@ export class PortfolioStreamer {
         try {
             const account = await alpaca.getAccount();
             const positions = await alpaca.getPositions();
+            const orders = await alpaca.getOrders('open');
 
             const portfolioState = {
                 id: '63963cac-3336-44d5-b7b7-913a89beb74f', // fixed singleton row UUID
@@ -23,10 +24,18 @@ export class PortfolioStreamer {
                     unrealized_plpc: parseFloat(p.unrealized_plpc),
                     side: p.side,
                 })),
+                orders: orders.map((o: any) => ({
+                    symbol: o.symbol,
+                    qty: parseFloat(o.qty),
+                    side: o.side,
+                    type: o.type,
+                    status: o.status,
+                    limit_price: o.limit_price ? parseFloat(o.limit_price) : null
+                })),
                 updated_at: new Date().toISOString(),
             };
 
-            // Upsert on id=1 so we always have one fresh row
+            // Upsert on id
             const { error } = await (supabase as any)
                 .from('portfolio_state')
                 .upsert(portfolioState, { onConflict: 'id' });

@@ -7,43 +7,46 @@ import { DiscordDispatcher } from './DiscordDispatcher';
 import { logAgentAction } from '../supabase';
 import axios from 'axios';
 
-const CORE_SYMBOLS = [
-    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'AVGO', 'JPM', 'V',
-    'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'ARKK',
-    'PLTR', 'COIN', 'HOOD', 'SOFI', 'AMD', 'INTC', 'MU', 'MSTR', 'SMCI', 'ARM',
-    'UNH', 'JNJ', 'PFE', 'ABBV',
-    'XOM', 'CVX', 'OXY',
-];
+import { TRADING_UNIVERSE, SECTORS } from '../universe';
+
+const CORE_SYMBOLS = [...TRADING_UNIVERSE];
 
 export class SwarmOrchestrator {
+    /*
+     * [x] **Phase 29: Massive Watchlist & Autonomous Discovery**
+     *  - [x] Implement `Universe.ts` with 500+ symbols.
+     *  - [x] Add `Deep Momentum Discovery` to `OmniScanner`.
+     *  - [x] Rotate analyzed symbols in `SwarmOrchestrator`.
+     */
     private scanner = new MarketScanner();
     private strategy = new StrategyEngine();
     private risk = new RiskController();
     private portfolio = new PortfolioStreamer();
     private omni = new OmniScanner();
 
-    private watchlist: string[] = [...CORE_SYMBOLS];
+    private watchlist: string[] = [];
+    private currentSectorIndex = 0;
     private isRunning = false;
     private cycleCounter = 0;
-    private discordInterval = 10;   // Discord brief every 10 minutes
-    private executionInterval = 10; // Execute signals every 10 minutes
+    private discordInterval = 30;   // Discord brief every 30 minutes
+    private executionInterval = 1;  // Execute signals every cycle (1m) — INSTANT TRADING
     private latestSentiment = 0.5;
 
     async start() {
         this.isRunning = true;
 
-        // --- LEAN HANDSHAKE ---
-        // Parallelize initial connections to reduce boot latency
-        const bootMsg = `ACE_OS Daemon Initialized | Watchlist: ${this.watchlist.length} symbols | Execution Interval: ${this.executionInterval}m`;
+        // Initial setup - populate with a healthy mix
+        await this.refreshWatchlist();
+
+        const bootMsg = `ACE_OS Daemon Initialized | Universe: ${CORE_SYMBOLS.length} symbols | Focus: ${this.watchlist.length} hot stocks`;
         console.log(`🚀 ${bootMsg}`);
 
         await Promise.all([
-            logAgentAction('Orchestrator', 'info', 'Daemon Booted', bootMsg),
-            this.refreshWatchlist(),
+            logAgentAction('Orchestrator', 'info', 'Daemon Massive Universe Online', bootMsg),
             this.portfolio.streamLiveData(),
             DiscordDispatcher.postUpdate(
-                'ACE_OS — DAEMON ONLINE',
-                `**Status:** System Normal\n**Watchlist:** ${this.watchlist.length} symbols\n**Market:** ${this.risk.isMarketOpen() ? 'OPEN' : 'CLOSED'}`,
+                'ACE_OS — WIDE HORIZON ACTIVE',
+                `**Status:** Monitoring 500+ Symbols\n**Current Focus:** ${this.watchlist.length} high-momentum stocks\n**Discovery Mode:** Sector Rotation Enabled`,
                 5763719
             )
         ]);
@@ -56,8 +59,15 @@ export class SwarmOrchestrator {
                 console.error('Cycle Error:', err);
                 await logAgentAction('Orchestrator', 'error', `Cycle Failed: ${err.message}`);
             }
-            console.log('Waiting 60 seconds...');
-            await new Promise(res => setTimeout(res, 60000));
+
+            // --- NEURAL PULSE: ADAPTIVE CYCLE DELAY ---
+            const isMarketOpen = this.risk.isMarketOpen();
+            const pulse = this.omni.getGlobalPulse();
+            const urgency = Math.abs(pulse.newsSentiment - 0.5) + (pulse.weatherRisk > 0.3 ? 0.2 : 0);
+            const cycleDelay = !isMarketOpen ? 120000 : (urgency > 0.3 ? 30000 : 60000);
+
+            console.log(`Neural Pulse: Next thought in ${cycleDelay / 1000}s (Urgency: ${urgency.toFixed(2)})`);
+            await new Promise(res => setTimeout(res, cycleDelay));
         }
     }
 
@@ -68,24 +78,36 @@ export class SwarmOrchestrator {
 
     private async refreshWatchlist() {
         try {
-            const { data } = await axios.get('https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=20', {
+            // 1. Sector Rotation: Pick a different sector each time
+            const sectorNames = Object.keys(SECTORS);
+            const currentSector = sectorNames[this.currentSectorIndex % sectorNames.length];
+            const sectorSymbols = SECTORS[currentSector] || [];
+            this.currentSectorIndex++;
+
+            // 2. Discover Gainers/Movers (Truly looking into all options)
+            const { data } = await axios.get('https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=15', {
                 headers: {
                     'APCA-API-KEY-ID': process.env.ALPACA_API_KEY || '',
                     'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET || '',
                 }
             });
+
             const movers: string[] = [
                 ...(data?.gainers?.map((s: any) => s.symbol) || []),
                 ...(data?.losers?.map((s: any) => s.symbol) || []),
             ].filter(Boolean);
-            if (movers.length > 0) {
-                this.watchlist = [...new Set([...CORE_SYMBOLS, ...movers])];
-                await logAgentAction('Orchestrator', 'info',
-                    `Watchlist updated: ${this.watchlist.length} symbols. Movers added: ${movers.join(', ')}`
-                );
-            }
-        } catch {
-            // Screener endpoint optional fallback
+
+            // 3. Combine: Sector + Movers + a few staples = the 'Hot' List for this cycle
+            const staples = ['AAPL', 'TSLA', 'NVDA', 'SPY'];
+            this.watchlist = [...new Set([...staples, ...sectorSymbols, ...movers])].slice(0, 30);
+
+            await logAgentAction('Orchestrator', 'discovery',
+                `Autonomous Discovery: Focusing on ${currentSector} and ${movers.length} top market movers.`,
+                `Analyzing: ${this.watchlist.join(', ')}`
+            );
+        } catch (e) {
+            // Fallback to staples if API fails
+            this.watchlist = TRADING_UNIVERSE.slice(0, 20);
         }
     }
 
@@ -101,11 +123,17 @@ export class SwarmOrchestrator {
         if (this.cycleCounter % 10 === 1) await this.refreshWatchlist();
         await this.portfolio.streamLiveData();
 
-        // 2. Fetch current active positions and open orders from Alpaca
+        // 2. Fetch current active positions and open orders from Alpaca using verified wrapper
+        // CRITICAL: We use the account's actual state to drive the Duplicate Guard
         const [positions, openOrders] = await Promise.all([
-            axios.get('https://paper-api.alpaca.markets/v2/positions', { headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY } }).then(r => r.data).catch(() => []),
-            axios.get('https://paper-api.alpaca.markets/v2/orders?status=open', { headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY } }).then(r => r.data).catch(() => [])
+            this.alpacaWrapperGetPositions(),
+            this.alpacaWrapperGetOrders()
         ]);
+
+        if (positions === null || openOrders === null) {
+            await logAgentAction('Orchestrator', 'error', 'Failed to synchronize with Alpaca. Skipping cycle to prevent duplicate risk.');
+            return;
+        }
 
         const activeSymbols = new Set([
             ...positions.map((p: any) => p.symbol),
@@ -193,5 +221,23 @@ export class SwarmOrchestrator {
             ].join('\n'),
             marketOpen ? 3066993 : 15844367
         );
+    }
+
+    private async alpacaWrapperGetPositions() {
+        try {
+            const { alpaca } = await import('../alpaca');
+            return await alpaca.getPositions();
+        } catch {
+            return null;
+        }
+    }
+
+    private async alpacaWrapperGetOrders() {
+        try {
+            const { alpaca } = await import('../alpaca');
+            return await alpaca.getOrders('open');
+        } catch {
+            return null;
+        }
     }
 }
