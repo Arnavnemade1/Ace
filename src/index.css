@@ -63,7 +63,12 @@
     @apply bg-background text-foreground font-body antialiased;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-display;
   }
 }
@@ -71,7 +76,7 @@
 @layer components {
   .glass-card {
     @apply bg-glass/60 backdrop-blur-xl border border-glass-border/40 rounded-xl;
-    box-shadow: 
+    box-shadow:
       0 0 0 1px hsl(var(--glass-border) / 0.1),
       0 8px 32px -8px hsl(var(--background) / 0.6),
       inset 0 1px 0 0 hsl(var(--glass-highlight) / 0.05);
@@ -82,7 +87,7 @@
   }
 
   .glass-card-hover:hover {
-    box-shadow: 
+    box-shadow:
       0 0 0 1px hsl(var(--glass-highlight) / 0.2),
       0 16px 48px -12px hsl(var(--background) / 0.8),
       0 0 40px -12px hsl(var(--primary) / 0.15),
@@ -119,13 +124,29 @@
 
 @layer utilities {
   @keyframes pulse-glow {
-    0%, 100% { opacity: 1; box-shadow: 0 0 8px hsl(var(--profit) / 0.6), 0 0 20px hsl(var(--profit) / 0.2); }
-    50% { opacity: 0.6; box-shadow: 0 0 4px hsl(var(--profit) / 0.3), 0 0 10px hsl(var(--profit) / 0.1); }
+
+    0%,
+    100% {
+      opacity: 1;
+      box-shadow: 0 0 8px hsl(var(--profit) / 0.6), 0 0 20px hsl(var(--profit) / 0.2);
+    }
+
+    50% {
+      opacity: 0.6;
+      box-shadow: 0 0 4px hsl(var(--profit) / 0.3), 0 0 10px hsl(var(--profit) / 0.1);
+    }
   }
 
   @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-6px); }
+
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+
+    50% {
+      transform: translateY(-6px);
+    }
   }
 
   .animate-float {
@@ -133,7 +154,33 @@
   }
 
   @keyframes scan-line {
-    0% { transform: translateY(-100%); }
-    100% { transform: translateY(100vh); }
+    0% {
+      transform: translateY(-100%);
+    }
+
+    100% {
+      transform: translateY(100vh);
+    }
+  }
+
+  @keyframes shake {
+
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+
+    25% {
+      transform: translateX(-2px);
+    }
+
+    75% {
+      transform: translateX(2px);
+    }
+  }
+
+  .animate-shake {
+    animation: shake 0.5s cubic-bezier(.36, .07, .19, .97) both;
+    animation-iteration-count: infinite;
   }
 }

@@ -54,49 +54,25 @@ export const HandshakeOverlay = () => {
 
     return (
         <AnimatePresence>
-            {(!isConnected || isChecking) && (
+            {!isConnected && !isChecking && (
                 <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center"
+                    initial={{ y: -20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -20, opacity: 0 }}
+                    className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
                 >
-                    <div className="relative mb-12">
-                        <motion.div
-                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
-                            transition={{ duration: 4, repeat: Infinity }}
-                            className="absolute inset-0 bg-primary blur-[100px] rounded-full"
-                        />
-                        <div className="relative bg-black/40 border border-white/10 p-8 rounded-3xl backdrop-blur-xl shadow-2xl">
-                            <Cpu className="w-16 h-16 text-primary mb-6 mx-auto animate-pulse" />
-                            <h2 className="text-3xl font-display font-black tracking-tighter text-white mb-2 uppercase">
-                                Daemon Handshake
-                            </h2>
-                            <p className="text-white/40 font-mono text-[10px] uppercase tracking-[0.3em] mb-8">
-                                Establishing Neural Link to Swarm Orchestrator
-                            </p>
-
-                            <div className="flex flex-col items-center gap-4">
-                                <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-full border border-white/10">
-                                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                                    <span className="text-[10px] font-mono text-white/60 tracking-widest uppercase">
-                                        {isChecking ? "Synchronizing..." : "Awaiting Heartbeat..."}
-                                    </span>
-                                </div>
-
-                                <p className="max-w-xs text-[10px] text-white/20 leading-relaxed italic">
-                                    Start the trading daemon in your terminal to continue:<br />
-                                    <code className="text-primary/60 not-italic">npm run daemon</code>
-                                </p>
-                            </div>
+                    <div className="bg-black/80 backdrop-blur-xl border border-red-500/20 px-4 py-2 rounded-full flex items-center gap-3 shadow-2xl">
+                        <div className="relative">
+                            <WifiOff className="w-3 h-3 text-red-500" />
+                            <div className="absolute inset-0 bg-red-500 blur-sm rounded-full animate-pulse opacity-50" />
                         </div>
-                    </div>
-
-                    <div className="fixed bottom-12 flex items-center gap-4 text-white/20 font-mono text-[9px] uppercase tracking-widest">
-                        <WifiOff className="w-3 h-3" />
-                        Status: Offline
-                        <div className="w-px h-3 bg-white/10" />
-                        Auth: Encrypted
+                        <span className="text-[9px] font-mono text-white/60 uppercase tracking-widest">
+                            Daemon Disconnected
+                        </span>
+                        <div className="h-2 w-px bg-white/10" />
+                        <span className="text-[8px] font-mono text-white/30 uppercase tracking-tighter">
+                            Check npm run daemon
+                        </span>
                     </div>
                 </motion.div>
             )}

@@ -19,7 +19,6 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <HandshakeOverlay />
       <BrowserRouter>
         <Navigation />
         <FloatingStatusBar />
