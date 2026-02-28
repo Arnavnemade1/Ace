@@ -1,15 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-    AreaChart, Area, LineChart, Line, BarChart, Bar,
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
-    ComposedChart
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, ReferenceLine, ComposedChart
 } from 'recharts';
 import { supabase } from "@/integrations/supabase/client";
-import { Activity, Globe, Cpu, Zap, Plane, Newspaper, Cloud, DollarSign, Trophy, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Activity, Globe, Cpu, Zap, Plane, Newspaper, Cloud, DollarSign, Trophy, TrendingUp, TrendingDown, Maximize2, X } from "lucide-react";
 
-/* ─── Generate ultra-realistic sinusoidal baseline ─── */
-function generateBaseline(key: string, base: number, volatility: number, trend = 0): DataPoint[] {
+/* ─── Baseline Generator ─── */
+function generateBaseline(base: number, volatility: number, trend = 0): DataPoint[] {
     const arr: DataPoint[] = [];
     let val = base;
     for (let i = 60; i >= 0; i--) {
@@ -26,34 +25,168 @@ function generateBaseline(key: string, base: number, volatility: number, trend =
 }
 
 interface DataPoint { time: string; ts: number; value: number; }
+interface StreamCfg {
+    base: number; vol: number; label: string; unit: string;
+    icon: any; color: string; source: string; trend?: number;
+    summary: string; // static AI blurb shown under chart
+}
 
-const STREAMS: Record<string, { base: number; vol: number; label: string; unit: string; icon: any; color: string; gradientFrom: string; source: string; trend?: number }> = {
-    ALPHA_VANTAGE: { base: 501.2, vol: 0.8, label: "SPY — Alpha Vantage", unit: "$", icon: DollarSign, color: "#00ff41", gradientFrom: "rgba(0,255,65,0.18)", source: "AlphaVantage" },
-    FINNHUB: { base: 500.8, vol: 0.6, label: "SPY — Finnhub RT", unit: "$", icon: Activity, color: "#00cfff", gradientFrom: "rgba(0,207,255,0.18)", source: "Finnhub" },
-    MARKETSTACK: { base: 499.5, vol: 0.7, label: "SPY — MarketStack", unit: "$", icon: TrendingUp, color: "#ffe600", gradientFrom: "rgba(255,230,0,0.15)", source: "MarketStack" },
-    TWELVEDATA: { base: 500.3, vol: 0.5, label: "QQQ — TwelveData", unit: "$", icon: Zap, color: "#c084fc", gradientFrom: "rgba(192,132,252,0.18)", source: "TwelveData" },
-    COINGECKO: { base: 91200, vol: 120, label: "BTC — CoinGecko", unit: "$", icon: Activity, color: "#f97316", gradientFrom: "rgba(249,115,22,0.18)", source: "CoinGecko" },
-    OPENMETEO: { base: 12, vol: 1.5, label: "Wind Speed (m/s)", unit: "m/s", icon: Cloud, color: "#38bdf8", gradientFrom: "rgba(56,189,248,0.18)", source: "OpenMeteo" },
-    ADSB: { base: 1280, vol: 30, label: "Flight Density", unit: "flt", icon: Plane, color: "#f43f5e", gradientFrom: "rgba(244,63,94,0.18)", source: "ADSBexchange" },
-    BALLDONTLIE: { base: 4, vol: 0.8, label: "Live Game Count", unit: "gm", icon: Trophy, color: "#a3e635", gradientFrom: "rgba(163,230,53,0.18)", source: "balldontlie" },
-    NEWSAPI: { base: 0.62, vol: 0.04, label: "Sentiment Score", unit: "", icon: Cpu, color: "#e879f9", gradientFrom: "rgba(232,121,249,0.18)", source: "NewsAPI", trend: 0.05 },
-    NEWSDATA: { base: 0.58, vol: 0.04, label: "Social Pulse Index", unit: "", icon: Newspaper, color: "#fb7185", gradientFrom: "rgba(251,113,133,0.18)", source: "NewsData.io" },
+const STREAMS: Record<string, StreamCfg> = {
+    ALPHA_VANTAGE: { base: 501.2, vol: 0.8, label: "SPY — Alpha Vantage", unit: "$", icon: DollarSign, color: "#00ff41", source: "AlphaVantage", summary: "SPY intraday price feed from Alpha Vantage. Tracking US large-cap equity momentum for momentum-scalp signals." },
+    FINNHUB: { base: 500.8, vol: 0.6, label: "SPY — Finnhub RT", unit: "$", icon: Activity, color: "#00cfff", source: "Finnhub", summary: "Real-time Finnhub tick feed for SPY. Cross-referenced with Alpha Vantage to detect spread anomalies and arbitrage windows." },
+    MARKETSTACK: { base: 499.5, vol: 0.7, label: "SPY — MarketStack", unit: "$", icon: TrendingUp, color: "#ffe600", source: "MarketStack", summary: "EOD and intraday data from MarketStack. Used for VWAP calculations and session open/close deviation scoring." },
+    TWELVEDATA: { base: 500.3, vol: 0.5, label: "QQQ — TwelveData", unit: "$", icon: Zap, color: "#c084fc", source: "TwelveData", summary: "QQQ quote from TwelveData BBO. Tech-heavy index used for sector rotation signals relative to SPY divergence." },
+    COINGECKO: { base: 91200, vol: 120, label: "BTC — CoinGecko", unit: "$", icon: Activity, color: "#f97316", source: "CoinGecko", summary: "Bitcoin 24h volume and spot price from CoinGecko. BTC dominance ratio monitored to predict risk-on/off sentiment shifts." },
+    OPENMETEO: { base: 12, vol: 1.5, label: "Wind Speed (m/s)", unit: "m/s", icon: Cloud, color: "#38bdf8", source: "OpenMeteo", summary: "Live atmospheric data from OpenMeteo. Disruption index weights energy-sector exposure and shipping route volatility." },
+    ADSB: { base: 1280, vol: 30, label: "Flight Density", unit: "", icon: Plane, color: "#f43f5e", source: "ADSBexchange", summary: "Global flight traffic density from ADSBexchange. High density correlates with economic activity; used as a macro alt-data signal." },
+    BALLDONTLIE: { base: 4, vol: 0.8, label: "Live Games", unit: "", icon: Trophy, color: "#a3e635", source: "balldontlie", summary: "Live sports game count from balldontlie API. Used for sports-arbitrage opportunity detection and weekend market liquidity proxies." },
+    NEWSAPI: { base: 0.62, vol: 0.04, label: "Market Sentiment", unit: "", icon: Cpu, color: "#e879f9", source: "NewsAPI", summary: "NLP sentiment score computed from NewsAPI headlines. Bullish (>0.65) / neutral / bearish (<0.45) thresholds gate entry signals.", trend: 0.05 },
+    NEWSDATA: { base: 0.58, vol: 0.04, label: "Social Pulse Index", unit: "", icon: Newspaper, color: "#fb7185", source: "NewsData.io", summary: "Social media pulse index from NewsData.io. Surge detection triggers early-warning flags for meme-driven volatility events." },
 };
 
-/* ─── Custom Tooltip ─── */
-const BloombergTooltip = ({ active, payload, label, unit }: any) => {
+/* ─── Tooltip ─── */
+const BBTooltip = ({ active, payload, label, unit }: any) => {
     if (!active || !payload?.length) return null;
     const v = payload[0]?.value;
     return (
-        <div className="bg-[#0a0a0a] border border-white/10 px-3 py-2 rounded shadow-2xl text-xs font-mono">
+        <div className="bg-[#0a0a0a] border border-white/10 px-3 py-2 rounded shadow-2xl text-xs font-mono z-50">
             <div className="text-white/40 mb-0.5">{label}</div>
             <div className="text-white font-bold text-sm">{unit}{typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</div>
         </div>
     );
 };
 
-/* ─── Single Chart Card ─── */
-const BloombergChart = ({ streamKey, data }: { streamKey: string; data: DataPoint[] }) => {
+/* ─── Chart Content (shared between card and fullscreen) ─── */
+const ChartContent = ({ streamKey, data, height = 112 }: { streamKey: string; data: DataPoint[]; height?: number }) => {
+    const cfg = STREAMS[streamKey];
+    const minV = Math.min(...data.map(d => d.value));
+    const maxV = Math.max(...data.map(d => d.value));
+    const pad = (maxV - minV) * 0.15 || 0.5;
+    const last = data[data.length - 1]?.value ?? 0;
+
+    return (
+        <ResponsiveContainer width="100%" height={height}>
+            <ComposedChart data={data} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
+                <defs>
+                    <linearGradient id={`grad-${streamKey}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={cfg.color} stopOpacity={0.35} />
+                        <stop offset="95%" stopColor={cfg.color} stopOpacity={0.01} />
+                    </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="#ffffff05" vertical={false} />
+                <XAxis dataKey="time" hide tick={{ fontSize: 8, fill: '#ffffff30' }} />
+                <YAxis domain={[minV - pad, maxV + pad]} hide />
+                <Tooltip content={<BBTooltip unit={cfg.unit} />} />
+                <ReferenceLine y={last} stroke={cfg.color} strokeDasharray="3 3" strokeOpacity={0.35} />
+                <Area
+                    type="monotoneX"
+                    dataKey="value"
+                    stroke={cfg.color}
+                    strokeWidth={1.5}
+                    fill={`url(#grad-${streamKey})`}
+                    dot={false}
+                    isAnimationActive={false}
+                />
+            </ComposedChart>
+        </ResponsiveContainer>
+    );
+};
+
+/* ─── Per-chart stats bar ─── */
+const StatBar = ({ data, unit, color }: { data: DataPoint[]; unit: string; color: string }) => {
+    const vals = data.map(d => d.value);
+    const min = Math.min(...vals).toLocaleString(undefined, { maximumFractionDigits: 3 });
+    const max = Math.max(...vals).toLocaleString(undefined, { maximumFractionDigits: 3 });
+    const avg = (vals.reduce((a, b) => a + b, 0) / vals.length).toLocaleString(undefined, { maximumFractionDigits: 3 });
+    const last = vals[vals.length - 1];
+    const first = vals[0];
+    const trendPct = first !== 0 ? (((last - first) / first) * 100).toFixed(3) : '0.000';
+    const isUp = last >= first;
+    return (
+        <div className="flex gap-3 text-[9px] font-mono text-white/40 border-t border-white/5 px-3 py-1.5 flex-wrap">
+            <span>MIN <span style={{ color }} className="font-bold">{unit}{min}</span></span>
+            <span>MAX <span style={{ color }} className="font-bold">{unit}{max}</span></span>
+            <span>AVG <span style={{ color }} className="font-bold">{unit}{avg}</span></span>
+            <span className={`ml-auto font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                {isUp ? '▲' : '▼'} {trendPct}% TREND
+            </span>
+        </div>
+    );
+};
+
+/* ─── Fullscreen Modal ─── */
+const FullscreenModal = ({ streamKey, data, onClose }: { streamKey: string; data: DataPoint[]; onClose: () => void }) => {
+    const cfg = STREAMS[streamKey];
+    const last = data[data.length - 1]?.value ?? 0;
+    const prev = data[data.length - 2]?.value ?? last;
+    const change = last - prev;
+    const isUp = change >= 0;
+
+    return (
+        <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={onClose}
+        >
+            <motion.div
+                className="relative w-full max-w-5xl bg-[#080a09] border rounded-lg overflow-hidden"
+                style={{ borderColor: `${cfg.color}40`, boxShadow: `0 0 60px ${cfg.color}20` }}
+                initial={{ scale: 0.92, opacity: 0, y: 24 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.92, opacity: 0, y: 24 }}
+                transition={{ type: "spring", stiffness: 300, damping: 28 }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {/* Top glow bar */}
+                <div className="h-[2px] w-full" style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
+
+                {/* Header */}
+                <div className="flex items-start justify-between px-6 pt-4 pb-2">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <cfg.icon className="w-5 h-5" style={{ color: cfg.color }} />
+                            <span className="text-lg font-black tracking-widest uppercase text-white">{cfg.label}</span>
+                        </div>
+                        <div className="text-[10px] text-white/30 uppercase tracking-wider mt-1">{cfg.source} • LIVE FEED • 2s TICK</div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                        <div className="text-right">
+                            <div className="text-2xl font-bold font-mono" style={{ color: cfg.color }}>
+                                {cfg.unit}{last.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                            </div>
+                            <div className={`text-sm flex items-center justify-end gap-1 font-mono mt-0.5 ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {isUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                                {isUp ? '+' : ''}{change.toFixed(4)}
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="mt-0.5 p-1.5 rounded border border-white/10 hover:border-white/30 text-white/50 hover:text-white transition-colors">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Chart — big */}
+                <div className="px-2">
+                    <ChartContent streamKey={streamKey} data={data} height={320} />
+                </div>
+
+                {/* Stats bar */}
+                <StatBar data={data} unit={cfg.unit} color={cfg.color} />
+
+                {/* AI Summary */}
+                <div className="px-6 pb-5 pt-1">
+                    <div className="text-[10px] uppercase tracking-widest text-white/30 mb-1.5">AI Data Analysis</div>
+                    <p className="text-[12px] text-white/60 leading-relaxed border-l-2 pl-3 italic" style={{ borderColor: `${cfg.color}60` }}>
+                        {cfg.summary}
+                    </p>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+};
+
+/* ─── Chart Card ─── */
+const BloombergChart = ({ streamKey, data, onExpand }: { streamKey: string; data: DataPoint[]; onExpand: () => void }) => {
     const cfg = STREAMS[streamKey];
     if (!cfg) return null;
 
@@ -63,21 +196,23 @@ const BloombergChart = ({ streamKey, data }: { streamKey: string; data: DataPoin
     const changePct = prev !== 0 ? (change / prev) * 100 : 0;
     const isUp = change >= 0;
 
-    const minV = Math.min(...data.map(d => d.value));
-    const maxV = Math.max(...data.map(d => d.value));
-    const pad = (maxV - minV) * 0.15 || 0.5;
-
     return (
         <motion.div
             layout
-            className="relative rounded border border-white/5 bg-[#0b0d0c] overflow-hidden group hover:border-white/20 transition-all duration-300"
+            className="relative rounded border border-white/5 bg-[#0b0d0c] overflow-hidden group hover:border-white/20 transition-all duration-300 cursor-pointer flex flex-col"
             style={{ boxShadow: `0 0 20px ${cfg.color}08` }}
+            onClick={onExpand}
         >
+            {/* Hover expand hint */}
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-60 transition-opacity z-10">
+                <Maximize2 className="w-3.5 h-3.5 text-white" />
+            </div>
+
             {/* Glow Header Line */}
-            <div className="h-[2px] w-full" style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
+            <div className="h-[2px] w-full shrink-0" style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
 
             {/* Header */}
-            <div className="flex items-start justify-between px-3 pt-2 pb-1">
+            <div className="flex items-start justify-between px-3 pt-2 pb-1 shrink-0">
                 <div>
                     <div className="flex items-center gap-1.5">
                         <cfg.icon className="w-3 h-3" style={{ color: cfg.color }} />
@@ -97,41 +232,25 @@ const BloombergChart = ({ streamKey, data }: { streamKey: string; data: DataPoin
             </div>
 
             {/* Chart */}
-            <div className="h-28 px-0 pb-1">
-                <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={data} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
-                        <defs>
-                            <linearGradient id={`grad-${streamKey}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={cfg.color} stopOpacity={0.3} />
-                                <stop offset="95%" stopColor={cfg.color} stopOpacity={0.01} />
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="2 4" stroke="#ffffff06" vertical={false} />
-                        <XAxis dataKey="time" hide />
-                        <YAxis domain={[minV - pad, maxV + pad]} hide />
-                        <Tooltip content={<BloombergTooltip unit={cfg.unit} />} />
-                        <Area
-                            type="monotoneX"
-                            dataKey="value"
-                            stroke={cfg.color}
-                            strokeWidth={1.5}
-                            fill={`url(#grad-${streamKey})`}
-                            dot={false}
-                            isAnimationActive={false}
-                        />
-                        {/* Highlight last value */}
-                        <ReferenceLine y={last} stroke={cfg.color} strokeDasharray="3 3" strokeOpacity={0.4} />
-                    </ComposedChart>
-                </ResponsiveContainer>
+            <div className="px-0 pb-0 flex-1" style={{ minHeight: 112 }}>
+                <ChartContent streamKey={streamKey} data={data} height={112} />
             </div>
 
-            {/* Pulse Dot — animates when new data arrives */}
+            {/* Stats Bar */}
+            <StatBar data={data} unit={cfg.unit} color={cfg.color} />
+
+            {/* Summary */}
+            <div className="px-3 pb-2.5 pt-1 shrink-0">
+                <p className="text-[8.5px] text-white/35 leading-relaxed line-clamp-2 italic">{cfg.summary}</p>
+            </div>
+
+            {/* Pulse Dot */}
             <motion.div
                 key={last}
-                className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full"
+                className="absolute bottom-12 right-2 w-1.5 h-1.5 rounded-full pointer-events-none"
                 style={{ backgroundColor: cfg.color }}
-                animate={{ scale: [1, 2, 1], opacity: [1, 0.3, 1] }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
+                animate={{ scale: [1, 2.5, 1], opacity: [1, 0.2, 1] }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
             />
         </motion.div>
     );
@@ -155,7 +274,6 @@ const Marquee = ({ headlines }: { headlines: string[] }) => {
                     <span className="pr-8">{text}</span>
                 </motion.div>
             </div>
-            {/* Right glow */}
             <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-black to-transparent pointer-events-none" />
         </div>
     );
@@ -165,20 +283,20 @@ const Marquee = ({ headlines }: { headlines: string[] }) => {
 const Analytics = () => {
     const [streams, setStreams] = useState<Record<string, DataPoint[]>>(() =>
         Object.fromEntries(
-            Object.entries(STREAMS).map(([k, cfg]) => [k, generateBaseline(k, cfg.base, cfg.vol, cfg.trend)])
+            Object.entries(STREAMS).map(([k, cfg]) => [k, generateBaseline(cfg.base, cfg.vol, cfg.trend)])
         )
     );
     const [headlines, setHeadlines] = useState<string[]>([
         "ACE_OS FEEDS ONLINE — OMNI-SCANNER ACTIVE",
         "MONITORING: AAPL  MSFT  NVDA  TSLA  SPY  QQQ  BTC  ETH",
         "HORIZON LOCK: 30-MINUTE SPAN PENALTY — AWAITING CONFIRMATION",
-        "ALPACA PAPER TRADING: $100K BALANCE ACTIVE",
     ]);
     const [rawLogs, setRawLogs] = useState<string[]>([]);
     const [cryptoPrices, setCryptoPrices] = useState<Record<string, number>>({});
+    const [expandedKey, setExpandedKey] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
 
-    /* Simulate slow chart movements every 2s even without daemon */
+    /* 2-second simulation tick */
     useEffect(() => {
         const iv = setInterval(() => {
             setTick(t => t + 1);
@@ -201,29 +319,20 @@ const Analytics = () => {
         return () => clearInterval(iv);
     }, []);
 
-    /* Supabase Realtime — splice in REAL data when daemon pushes */
+    /* Supabase Realtime */
     useEffect(() => {
         const channel = (supabase as any)
-            .channel('analytics-v3')
+            .channel('analytics-v4')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_api_streams' }, (payload: any) => {
                 const row = payload.new;
                 const time = new Date(row.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 const ts = new Date(row.created_at || Date.now()).getTime();
-
                 setRawLogs(prev => [`${new Date().toLocaleTimeString()} ► [${row.source}] INBOUND`, ...prev].slice(0, 50));
 
-                // Map source to stream key
                 const srcMap: Record<string, string> = {
-                    'AlphaVantage': 'ALPHA_VANTAGE',
-                    'Finnhub': 'FINNHUB',
-                    'MarketStack': 'MARKETSTACK',
-                    'TwelveData': 'TWELVEDATA',
-                    'CoinGecko': 'COINGECKO',
-                    'OpenMeteo': 'OPENMETEO',
-                    'ADSBexchange': 'ADSB',
-                    'balldontlie': 'BALLDONTLIE',
-                    'NewsAPI': 'NEWSAPI',
-                    'NewsData.io': 'NEWSDATA',
+                    'AlphaVantage': 'ALPHA_VANTAGE', 'Finnhub': 'FINNHUB', 'MarketStack': 'MARKETSTACK',
+                    'TwelveData': 'TWELVEDATA', 'CoinGecko': 'COINGECKO', 'OpenMeteo': 'OPENMETEO',
+                    'ADSBexchange': 'ADSB', 'balldontlie': 'BALLDONTLIE', 'NewsAPI': 'NEWSAPI', 'NewsData.io': 'NEWSDATA',
                 };
                 const key = srcMap[row.source];
                 let value: number | null = null;
@@ -240,24 +349,24 @@ const Analytics = () => {
                     case 'OpenMeteo': value = row.payload?.current?.wind_speed_10m ?? row.payload?.wind_speed_10m; break;
                     case 'ADSBexchange': value = row.payload?.traffic_density_index ?? row.payload?.total; break;
                     case 'balldontlie': value = Array.isArray(row.payload) ? row.payload.length : row.payload?.count; break;
-                    case 'NewsAPI': value = 0.5 + Math.random() * 0.2; break;
-                    case 'NewsData.io': value = 0.5 + Math.random() * 0.2;
+                    case 'NewsAPI':
+                        value = 0.5 + Math.random() * 0.2;
+                        if (Array.isArray(row.payload)) {
+                            const hs = row.payload.slice(0, 3).map((a: any) => `[NewsAPI] ${a.title || 'UPDATE'}`);
+                            setHeadlines(prev => [...hs, ...prev].slice(0, 14));
+                        }
+                        break;
+                    case 'NewsData.io':
+                        value = 0.5 + Math.random() * 0.2;
                         if (Array.isArray(row.payload)) {
                             const hs = row.payload.slice(0, 3).map((a: any) => `[NewsData] ${a.title || 'UPDATE'}`);
-                            setHeadlines(prev => [...hs, ...prev].slice(0, 12));
+                            setHeadlines(prev => [...hs, ...prev].slice(0, 14));
                         }
                         break;
                 }
-                if (row.source === 'NewsAPI' && Array.isArray(row.payload)) {
-                    const hs = row.payload.slice(0, 3).map((a: any) => `[NewsAPI] ${a.title || 'UPDATE'}`);
-                    setHeadlines(prev => [...hs, ...prev].slice(0, 12));
-                }
 
                 if (key && value != null && !isNaN(value)) {
-                    setStreams(prev => ({
-                        ...prev,
-                        [key]: [...(prev[key] || []).slice(-59), { time, ts, value }]
-                    }));
+                    setStreams(prev => ({ ...prev, [key]: [...(prev[key] || []).slice(-59), { time, ts, value: value! }] }));
                 }
             })
             .subscribe();
@@ -271,9 +380,19 @@ const Analytics = () => {
         <div className="min-h-screen bg-[#060807] pt-24 pb-16 font-mono text-xs text-white">
             <Marquee headlines={headlines} />
 
-            <div className="container mx-auto px-4">
+            {/* Fullscreen Modal */}
+            <AnimatePresence>
+                {expandedKey && (
+                    <FullscreenModal
+                        streamKey={expandedKey}
+                        data={streams[expandedKey] || []}
+                        onClose={() => setExpandedKey(null)}
+                    />
+                )}
+            </AnimatePresence>
 
-                {/* ── Bloomberg Header ── */}
+            <div className="container mx-auto px-4">
+                {/* Header */}
                 <div className="flex items-end justify-between border-b border-white/5 pb-3 mb-5">
                     <div>
                         <div className="text-[10px] text-[#00ff41]/60 tracking-[0.3em] uppercase mb-1">ACE_OS // OMNI-STREAM TERMINAL</div>
@@ -282,6 +401,7 @@ const Analytics = () => {
                             <span className="text-white/20">•</span>
                             <span className="text-lg text-white/50">10 LIVE API FEEDS</span>
                         </h1>
+                        <div className="text-[9px] text-white/25 mt-1">Click any chart to expand fullscreen</div>
                     </div>
                     <div className="text-right space-y-1">
                         <div className="flex gap-4 text-[11px] font-bold">
@@ -292,31 +412,24 @@ const Analytics = () => {
                     </div>
                 </div>
 
-                {/* ── 10 Chart Grid ── */}
+                {/* 10 Chart Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
                     {streamKeys.map(k => (
-                        <BloombergChart key={k} streamKey={k} data={streams[k]} />
+                        <BloombergChart key={k} streamKey={k} data={streams[k]} onExpand={() => setExpandedKey(k)} />
                     ))}
                 </div>
 
-                {/* ── Bottom Row: Logs / AI / Status ── */}
+                {/* Bottom Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mt-3">
-                    {/* Raw Terminal */}
-                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-56 flex flex-col">
+                    {/* Terminal Firehose */}
+                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-52 flex flex-col">
                         <div className="text-[10px] tracking-widest uppercase text-[#00ff41]/70 mb-2 flex items-center gap-1.5 border-b border-white/5 pb-1.5">
                             <Cpu className="w-3 h-3" /> RAW FEED TERMINAL
                         </div>
-                        <div className="flex-1 overflow-y-auto space-y-0.5 text-[9px] text-white/40 leading-relaxed">
+                        <div className="flex-1 overflow-y-auto space-y-0.5 text-[9px] text-[#00ff41]/50 leading-relaxed">
                             <AnimatePresence initial={false}>
                                 {rawLogs.map((log, i) => (
-                                    <motion.div
-                                        key={log + i}
-                                        initial={{ opacity: 0, x: -6 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0 }}
-                                        transition={{ duration: 0.2 }}
-                                        className="text-[#00ff41]/60"
-                                    >
+                                    <motion.div key={log + i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
                                         {log}
                                     </motion.div>
                                 ))}
@@ -325,32 +438,28 @@ const Analytics = () => {
                         </div>
                     </div>
 
-                    {/* AI Synthesis */}
-                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-56 flex flex-col relative overflow-hidden">
+                    {/* AI Reasoning */}
+                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-52 flex flex-col relative overflow-hidden">
                         <div className="text-[10px] tracking-widest uppercase text-[#00ff41]/70 mb-2 flex items-center gap-1.5 border-b border-white/5 pb-1.5">
                             <Zap className="w-3 h-3" /> AI REASONING SYNTHESIS
                         </div>
                         <div className="space-y-2 text-[10px] flex-1">
-                            <div className="p-2 bg-[#00ff41]/5 border-l-2 border-[#00ff41]/40 leading-relaxed text-white/60 italic">
+                            <div className="p-2 bg-[#00ff41]/5 border-l-2 border-[#00ff41]/40 leading-relaxed text-white/60 italic text-[10px]">
                                 "Correlating 10 API arrays: Finnhub/Alpha divergence ±0.4σ. CoinGecko BTC 24h volume above 90th percentile. OpenMeteo disruption index stable. ADSB flight density within range."
                             </div>
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="flex gap-2 flex-wrap mt-1">
                                 {['MOMENTUM: +', 'RISK: LOW', 'MACRO: NEUTRAL', 'SENTIMENT: 0.62'].map(tag => (
                                     <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-white/50">{tag}</span>
                                 ))}
                             </div>
                         </div>
-                        <motion.div
-                            animate={{ opacity: [0.6, 1, 0.6] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                            className="mt-2 text-center text-[10px] text-yellow-500 font-bold tracking-widest uppercase"
-                        >
-                            ::: HORIZON LOCK ACTIVE — T-{30 - Math.floor(tick / 30)} MIN :::
+                        <motion.div animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 2, repeat: Infinity }} className="mt-2 text-center text-[10px] text-yellow-500 font-bold tracking-widest uppercase">
+                            ::: HORIZON LOCK ACTIVE — T-{Math.max(1, 30 - Math.floor(tick / 30))} MIN :::
                         </motion.div>
                     </div>
 
-                    {/* API Status Grid */}
-                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-56 flex flex-col">
+                    {/* API Status */}
+                    <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 h-52 flex flex-col">
                         <div className="text-[10px] tracking-widest uppercase text-[#00ff41]/70 mb-2 flex items-center gap-1.5 border-b border-white/5 pb-1.5">
                             <Globe className="w-3 h-3" /> API FEDERATION MATRIX
                         </div>
@@ -358,14 +467,12 @@ const Analytics = () => {
                             {streamKeys.map(k => {
                                 const cfg = STREAMS[k];
                                 const last = streams[k]?.[streams[k].length - 1];
-                                const prev = streams[k]?.[streams[k].length - 2];
-                                const up = last && prev ? last.value >= prev.value : true;
+                                const prevP = streams[k]?.[streams[k].length - 2];
+                                const up = last && prevP ? last.value >= prevP.value : true;
                                 return (
                                     <div key={k} className="flex items-center justify-between border-b border-white/5 pb-1">
                                         <span className="text-white/40 uppercase truncate">{k.replace('_', '')}</span>
-                                        <span className={`font-bold ${up ? 'text-emerald-400' : 'text-red-400'}`}>
-                                            {up ? '▲' : '▼'} LIVE
-                                        </span>
+                                        <span className={`font-bold ${up ? 'text-emerald-400' : 'text-red-400'}`}>{up ? '▲' : '▼'} LIVE</span>
                                     </div>
                                 );
                             })}
