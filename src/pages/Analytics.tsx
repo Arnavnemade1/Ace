@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { supabase } from "@/integrations/supabase/client";
 import { Activity, Globe, Cpu, Zap, Plane, Newspaper, Cloud, DollarSign, Trophy, TrendingUp, TrendingDown, Maximize2, X } from "lucide-react";
+import { MarketCountdown } from "@/components/MarketCountdown";
 
 /* ─── Baseline Generator ─── */
 function generateBaseline(base: number, volatility: number, trend = 0): DataPoint[] {
@@ -403,12 +404,12 @@ const Analytics = () => {
                         </h1>
                         <div className="text-[9px] text-white/25 mt-1">Click any chart to expand fullscreen</div>
                     </div>
-                    <div className="text-right space-y-1">
-                        <div className="flex gap-4 text-[11px] font-bold">
+                    <div className="text-right space-y-2">
+                        <MarketCountdown compact />
+                        <div className="flex gap-4 text-[11px] font-bold justify-end">
                             {cryptoPrices.btc && <span className="text-orange-400">BTC ${cryptoPrices.btc?.toLocaleString()}</span>}
                             {cryptoPrices.eth && <span className="text-purple-400">ETH ${cryptoPrices.eth?.toLocaleString()}</span>}
                         </div>
-                        <div className="text-[10px] text-white/30">{new Date().toLocaleTimeString()} EST — HEARTBEAT 2s</div>
                     </div>
                 </div>
 

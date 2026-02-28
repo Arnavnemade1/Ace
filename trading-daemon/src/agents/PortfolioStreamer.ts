@@ -10,27 +10,32 @@ export class PortfolioStreamer {
             const positions = await alpaca.getPositions();
 
             const portfolioState = {
+                id: 1, // fixed singleton row
                 total_value: parseFloat(account.portfolio_value),
                 cash: parseFloat(account.cash),
+                buying_power: parseFloat(account.buying_power),
                 positions: positions.map((p: any) => ({
                     symbol: p.symbol,
                     qty: parseFloat(p.qty),
+                    avg_entry_price: parseFloat(p.avg_entry_price),
                     current_price: parseFloat(p.current_price),
                     market_value: parseFloat(p.market_value),
                     unrealized_pl: parseFloat(p.unrealized_pl),
-                    unrealized_plpc: parseFloat(p.unrealized_plpc)
+                    unrealized_plpc: parseFloat(p.unrealized_plpc),
+                    side: p.side,
                 })),
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
             };
 
-            const { error } = await supabase
+            // Upsert on id=1 so we always have one fresh row
+            const { error } = await (supabase as any)
                 .from('portfolio_state')
-                .update(portfolioState)
-                // just update the single row that is inserted by default
-                .neq('id', '00000000-0000-0000-0000-000000000000');
+                .upsert(portfolioState, { onConflict: 'id' });
 
             if (error) {
-                console.error('Failed to update portfolio state:', error);
+                console.error('[PortfolioStreamer] Upsert failed:', error.message);
+            } else {
+                console.log(`[PortfolioStreamer] Updated: $${portfolioState.total_value.toFixed(2)} | ${positions.length} positions`);
             }
 
             return portfolioState;
