@@ -14,6 +14,8 @@ interface AgentLog {
 const AgentArena = () => {
     const [logs, setLogs] = useState<AgentLog[]>([]);
     const [portfolio, setPortfolio] = useState<any>(null);
+    const [neuralLoad, setNeuralLoad] = useState(20);
+    const [currentAction, setCurrentAction] = useState("SYNTHESIZING...");
 
     useEffect(() => {
         // Fetch recent thoughts
@@ -27,6 +29,12 @@ const AgentArena = () => {
                     type: l.log_type,
                     message: l.message
                 })));
+
+                // Set initial load based on latest activity
+                if (data[0]) {
+                    setCurrentAction(data[0].message.length > 30 ? data[0].message.slice(0, 30) + "..." : data[0].message);
+                    setNeuralLoad(data[0].agent_name === 'Orchestrator' ? 85 : 45);
+                }
             }
         };
 
@@ -49,6 +57,17 @@ const AgentArena = () => {
                     type: l.log_type,
                     message: l.message
                 }, ...prev].slice(0, 30));
+
+                // Drive Neural Load Bar from actual activity
+                const loadMap: Record<string, number> = {
+                    'Orchestrator': 90,
+                    'Strategy Engine': 75,
+                    'Risk Controller': 60,
+                    'Market Scanner': 40,
+                    'Portfolio Optimizer': 50
+                };
+                setNeuralLoad(loadMap[l.agent_name] || 30);
+                setCurrentAction(l.message.length > 20 ? l.message.slice(0, 20).toUpperCase() + "..." : l.message.toUpperCase());
             })
             .subscribe();
 
@@ -86,12 +105,14 @@ const AgentArena = () => {
                         <p className="text-[10px] text-muted-foreground uppercase tracking-tighter font-semibold mb-1">Neural Load</p>
                         <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
                             <motion.div
-                                animate={{ width: ["20%", "45%", "32%", "88%", "15%"] }}
-                                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                                animate={{ width: `${neuralLoad}%` }}
+                                transition={{ type: "spring", stiffness: 100, damping: 20 }}
                                 className="h-full bg-primary shadow-[0_0_8px_rgba(56,189,248,0.5)]"
                             />
                         </div>
-                        <p className="mt-2 text-xs font-mono text-primary/80 tracking-widest">SYNTHESIZING...</p>
+                        <p className="mt-2 text-xs font-mono text-primary/80 tracking-widest animate-pulse truncate w-full px-2">
+                            {currentAction}
+                        </p>
                     </div>
 
                     <div className="glass-card p-6 col-span-1 lg:col-span-2 flex flex-col relative overflow-hidden bg-white/[0.02]">

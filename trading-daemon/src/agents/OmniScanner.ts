@@ -23,9 +23,7 @@ export class OmniScanner {
     private seenNewsTitles = new Set<string>();
 
     async scanAll(symbols: string[]): Promise<any> {
-        console.log(`[OmniScanner] Initiating Massive Parallel API Ingestion...`);
-        this.results = {}; // Reset for new cycle
-        this.seenNewsTitles.clear();
+        console.log(`[OmniScanner] Scanning batch of ${symbols.length}...`);
 
         // Dynamic News Query based on active stocks
         const contextQuery = symbols.length > 0 ? `(${symbols.slice(0, 3).join(' OR ')}) AND market` : 'stock market';
@@ -45,6 +43,11 @@ export class OmniScanner {
 
         console.log(`[OmniScanner] Ingestion complete. Collected ${((this.results['GLOBAL_NEWS'] || []) as any[]).length} fresh news items.`);
         return this.results;
+    }
+
+    reset() {
+        this.results = {};
+        this.seenNewsTitles.clear();
     }
 
     getGlobalPulse(): GlobalPulse {

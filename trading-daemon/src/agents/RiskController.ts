@@ -6,6 +6,9 @@ export class RiskController {
     private positionLimit = 5000;     // max USD per trade
     private strengthThreshold = 0.65; // minimum signal strength to act
 
+    // [x] Phase 32: Symbol Fatigue & Manual Blacklist
+    private SYMBOL_BLACKLIST = new Set(['HOOD', 'SOFI', 'ABBV']);
+
     /** Returns true if NYSE regular trading hours (9:30-16:00 ET, weekdays) */
     isMarketOpen(): boolean {
         const nowNY = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -17,11 +20,31 @@ export class RiskController {
 
     private recentlyPushed = new Set<string>();
 
-    async executeSignals(signals: any[], isMarketOpen: boolean, currentPositions: any[] = [], openOrders: any[] = []): Promise<{ executed: any[]; queued: any[] }> {
+    /**
+     * [x] Phase 31: Dynamic Risk Gating
+     * Validates account state before any execution.
+     */
+    async validateAccount(account: any): Promise<boolean> {
+        if (account.trading_blocked) {
+            await logAgentAction('Risk Controller', 'error', 'ALGORITHM HALTED: Alpaca account is TRADING_BLOCKED.');
+            return false;
+        }
+        if (account.status !== 'ACTIVE') {
+            await logAgentAction('Risk Controller', 'error', `ALGORITHM HALTED: Account status is ${account.status}.`);
+            return false;
+        }
+        return true;
+    }
+
+    async executeSignals(signals: any[], isMarketOpen: boolean, account: any, currentPositions: any[] = [], openOrders: any[] = []): Promise<{ executed: any[]; queued: any[] }> {
         const executed: any[] = [];
         const queued: any[] = [];
 
         if (signals.length === 0) return { executed, queued };
+
+        // 0. Account Health Guard
+        const isHealthy = await this.validateAccount(account);
+        if (!isHealthy) return { executed, queued };
 
         // 1. Filter to strong enough signals only
         const viable = signals.filter(s => s.strength >= this.strengthThreshold);
@@ -32,6 +55,12 @@ export class RiskController {
 
         const finalViable: any[] = [];
         for (const s of viable) {
+            // [x] Phase 32: Hard Blacklist Check
+            if (this.SYMBOL_BLACKLIST.has(s.symbol)) {
+                console.log(`[Risk Guard] Blocking BLACKLISTED symbol: ${s.symbol}`);
+                continue;
+            }
+
             if (s.signal_type === 'BUY') {
                 // Persistent check: 24h Supabase lookup + Local cache + Current holdings
                 const tradedRecently = await this.hasTradedRecently(s.symbol, 'BUY');
@@ -42,42 +71,55 @@ export class RiskController {
                     continue;
                 }
             } else if (s.signal_type === 'SELL') {
-                // Sell-Side Guard: Only sell if we have a position to liquidate
-                const held = posSymbols.has(s.symbol);
-                if (!held) {
+                // Sell-Side Guard: Only sell if we have a position to liquidate AND no open order
+                const hasPosition = posSymbols.has(s.symbol);
+                const hasOpenOrder = orderSymbols.has(s.symbol);
+
+                if (!hasPosition) {
                     console.log(`[Risk Guard] Blocking NAKED SELL for ${s.symbol}. No active position found.`);
+                    continue;
+                }
+                if (hasOpenOrder) {
+                    console.log(`[Risk Guard] Blocking redundant SELL for ${s.symbol}. Open order already exists.`);
                     continue;
                 }
             }
             finalViable.push(s);
         }
 
-        // 3. Exposure Cap: Don't allow more than 10 active positions
-        if (currentPositions.length >= 10 && finalViable.some(s => s.signal_type === 'BUY')) {
-            await logAgentAction('Risk Controller', 'info', `Exposure Cap Reached (${currentPositions.length}/10). Skipping new BUY signals.`);
+        // 3. Exposure Cap: Don't allow more than 15 active positions (increased from 10)
+        if (currentPositions.length >= 15 && finalViable.some(s => s.signal_type === 'BUY')) {
+            await logAgentAction('Risk Controller', 'info', `Exposure Cap Reached (${currentPositions.length}/15). Skipping new BUY signals.`);
             return { executed, queued };
         }
 
-        if (finalViable.length === 0) {
-            // Memory fix: NEVER clear recentlyPushed here. Let it persist for the session.
-            return { executed, queued };
-        }
+        if (finalViable.length === 0) return { executed, queued };
 
         const modeMsg = isMarketOpen ? 'LIVE MARKET TRADING' : 'MARKET CLOSED - PRE-ORDER MODE (GTC)';
         await logAgentAction('Risk Controller', 'info', `Operational Mode: ${modeMsg}`);
+
+        // 4. Dynamic Lot Sizing based on Account Equity/Buying Power
+        const equity = parseFloat(account.equity);
+        const buyingPower = parseFloat(account.buying_power);
+        const maxPerTrade = Math.min(equity * 0.05, buyingPower * 0.5, 5000); // Max 5% equity, 50% BP, or absolute $5000
 
         for (const signal of finalViable) {
             const price = signal.metadata?.price_observed || 0;
             if (price <= 0) continue;
 
-            const qty = Math.max(1, Math.floor(this.positionLimit / price));
+            const qty = Math.max(1, Math.floor(maxPerTrade / price));
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
+
+            if (qty * price > buyingPower && side === 'buy') {
+                await logAgentAction('Risk Controller', 'error', `INSOLVENT: Required $${(qty * price).toFixed(2)} exceeds $${buyingPower.toFixed(2)} Buying Power.`);
+                continue;
+            }
 
             try {
                 if (isMarketOpen) {
                     // --- LIVE TRADING ---
                     await logAgentAction('Risk Controller', 'trade',
-                        `EXECUTING ${signal.signal_type} ${signal.symbol} | Reasoning: ${signal.reasoning}`
+                        `EXECUTING ${signal.signal_type} ${signal.symbol} x${qty} | Reasoning: ${signal.reasoning}`
                     );
 
                     const order = await alpaca.createOrder({

@@ -10,6 +10,7 @@ import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
 
 import { FloatingStatusBar } from "./components/FloatingStatusBar";
+import { HandshakeOverlay } from "./components/HandshakeOverlay";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <HandshakeOverlay />
       <BrowserRouter>
         <Navigation />
         <FloatingStatusBar />
