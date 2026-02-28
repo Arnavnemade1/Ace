@@ -24,8 +24,6 @@ export class StrategyEngine {
     }
 
     async evaluate(symbols: string[], macroIntel: any) {
-        await logAgentAction('Strategy Engine', 'info', `Evaluating strategies on ${symbols.length} symbols with live macro intel.`);
-
         const signals: any[] = [];
 
         // Fetch all snapshots in parallel
@@ -35,7 +33,6 @@ export class StrategyEngine {
             const symbol = symbols[i];
             const snap = snapshots[i];
 
-            // Fallback price if Alpaca snapshot unavailable
             const price = snap?.latestTrade?.p ?? snap?.dailyBar?.c ?? null;
             const prevClose = snap?.prevDailyBar?.c ?? price;
             const volume = snap?.dailyBar?.v ?? 0;
@@ -43,39 +40,52 @@ export class StrategyEngine {
             if (!price) continue;
 
             const priceChangePct = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
-            const volumeStrength = volume > 1_000_000 ? 0.15 : 0.05; // bonus for high volume
+            const volumeStrength = volume > 2_000_000 ? 0.2 : (volume > 500_000 ? 0.1 : 0.0);
 
-            // ── MOMENTUM SIGNAL ──
-            // Buy if price up >0.3% with good volume + positive macro sentiment
-            // Sell if price down >0.3% + negative macro sentiment
-            const sentimentBonus = ((macroIntel.newsSentiment || 0.5) - 0.5) * 0.3;
-            const momentumScore = Math.abs(priceChangePct) / 2 + volumeStrength + sentimentBonus;
-            const strength = Math.min(parseFloat((0.55 + momentumScore + Math.random() * 0.1).toFixed(3)), 1.0);
-            const isBuy = priceChangePct >= 0 && macroIntel.newsSentiment >= 0.45;
+            // --- REFINED MOMENTUM LOGIC ---
+            // Base strength is pure volatility + volume + sentiment
+            const sentimentScore = ((macroIntel.newsSentiment || 0.5) - 0.5);
+            const volatilityAlpha = Math.abs(priceChangePct) / 3;
 
-            if (strength >= 0.65) {
+            // Dynamic strength: 0.0 to 1.0
+            let strength = Math.min(volatilityAlpha + volumeStrength + Math.abs(sentimentScore), 1.0);
+
+            // Fix: Directional bias (Don't just count absolute volatility)
+            const isBuy = priceChangePct >= 0.05 && (macroIntel.newsSentiment >= 0.5);
+            const isSell = priceChangePct <= -0.05 && (macroIntel.newsSentiment <= 0.5);
+
+            // Threshold: Only act if strength is significant (> 0.4)
+            // Monologue: Only log High Conviction (> 0.85)
+            if (strength >= 0.4 && (isBuy || isSell)) {
                 const signal = {
                     symbol,
                     signal_type: isBuy ? 'BUY' : 'SELL',
-                    strength,
+                    strength: parseFloat(strength.toFixed(3)),
                     source_agent: 'Strategy Engine',
-                    reasoning: `${symbol} @ $${price.toFixed(2)} (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}% daily). Volume: ${volume.toLocaleString()}. News sentiment: ${(macroIntel.newsSentiment || 0.5).toFixed(2)}. Momentum score: ${momentumScore.toFixed(3)}.`,
+                    reasoning: `${symbol} @ $${price.toFixed(2)} (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}% daily). Momentum: ${volatilityAlpha.toFixed(3)}. Sentiment: ${sentimentScore.toFixed(2)}.`,
                     metadata: {
                         price_observed: price,
                         price_change_pct: priceChangePct,
                         volume,
-                        macro_sentiment: macroIntel.newsSentiment,
-                        prev_close: prevClose,
+                        macro_sentiment: macroIntel.newsSentiment
                     }
                 };
-
                 signals.push(signal);
-                await logAgentAction('Strategy Engine', 'decision',
-                    `[${signal.signal_type}] ${symbol} @ $${price.toFixed(2)} | strength ${strength} | Δ${priceChangePct.toFixed(2)}%`
-                );
-
-                await supabase.from('signals').insert(signal);
             }
+        }
+
+        // --- MONOLOGUE FILTER ---
+        // Only log the Top 5 High-Conviction signals to Supabase to prevent UI flooding
+        const topSignals = [...signals]
+            .filter(s => s.strength >= 0.85) // High Conviction Only
+            .sort((a, b) => b.strength - a.strength)
+            .slice(0, 5);
+
+        for (const sig of topSignals) {
+            await logAgentAction('Strategy Engine', 'decision',
+                `[${sig.signal_type}] ${sig.symbol} | Conviction: ${sig.strength} | Δ${sig.metadata.price_change_pct.toFixed(2)}%`
+            );
+            await supabase.from('signals').insert(sig);
         }
 
         return signals;

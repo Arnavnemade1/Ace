@@ -31,18 +31,22 @@ export class SwarmOrchestrator {
 
     async start() {
         this.isRunning = true;
-        await logAgentAction('Orchestrator', 'info',
-            `Swarm Orchestrator started. Monitoring ${this.watchlist.length} symbols. Discord interval: ${this.discordInterval} minutes.`
-        );
-        await DiscordDispatcher.postUpdate(
-            'ACE_OS — DAEMON INITIALIZED',
-            [
-                `**Watchlist:** ${this.watchlist.length} symbols`,
-                `**Execution Interval:** Every ${this.executionInterval} minutes`,
-                `**Market Status:** ${this.risk.isMarketOpen() ? 'OPEN' : 'CLOSED — GTC queue active'}`,
-            ].join('\n'),
-            5763719
-        );
+
+        // --- LEAN HANDSHAKE ---
+        // Parallelize initial connections to reduce boot latency
+        const bootMsg = `ACE_OS Daemon Initialized | Watchlist: ${this.watchlist.length} symbols | Execution Interval: ${this.executionInterval}m`;
+        console.log(`🚀 ${bootMsg}`);
+
+        await Promise.all([
+            logAgentAction('Orchestrator', 'info', 'Daemon Booted', bootMsg),
+            this.refreshWatchlist(),
+            this.portfolio.streamLiveData(),
+            DiscordDispatcher.postUpdate(
+                'ACE_OS — DAEMON ONLINE',
+                `**Status:** System Normal\n**Watchlist:** ${this.watchlist.length} symbols\n**Market:** ${this.risk.isMarketOpen() ? 'OPEN' : 'CLOSED'}`,
+                5763719
+            )
+        ]);
 
         while (this.isRunning) {
             try {

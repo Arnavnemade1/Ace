@@ -88,7 +88,7 @@ const Index = () => {
       <footer className="py-24 border-t border-white/5 bg-black">
         <div className="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-12">
           <div className="flex flex-col items-center md:items-start space-y-2">
-            <span className="text-4xl font-display font-black tracking-[-0.08em] bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] to-[#ec4899]">ACE</span>
+            <span className="text-4xl font-display font-black tracking-[0.05em] bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] to-[#ec4899]">ACE</span>
             <span className="text-[10px] font-mono tracking-[0.4em] text-white/10 uppercase font-black italic">v2.4.0 // Autonomous Protocol</span>
           </div>
           <div className="text-center md:text-right text-white/20 text-[9px] uppercase tracking-widest leading-loose max-w-sm">

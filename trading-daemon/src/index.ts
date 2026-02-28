@@ -21,11 +21,7 @@ async function main() {
 
     // Start the Swarm Orchestrator loop
     const orchestrator = new SwarmOrchestrator();
-
-    // Wait before starting the loop so the boot logs register
-    setTimeout(() => {
-        orchestrator.start();
-    }, 1000);
+    orchestrator.start();
 
     // Setup Nightly Causal Replay Arena (Mocked as interval for demo purposes: runs every 5 minutes in demo)
     const arena = new CausalReplayArena();
