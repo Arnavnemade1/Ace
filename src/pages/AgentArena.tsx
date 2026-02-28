@@ -96,7 +96,9 @@ const AgentArena = () => {
                         <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-1">Live Portfolio Value</p>
                         <h2 className="text-4xl font-display font-bold profit-text glow-text">${portfolio ? portfolio.total_value.toLocaleString() : '---'}</h2>
                         <div className="mt-3 flex gap-4 text-sm opacity-80">
-                            <div><span className="text-muted-foreground">Cash:</span> ${portfolio ? portfolio.cash.toLocaleString() : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">Cash:</span> ${portfolio ? portfolio.cash.toLocaleString() : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">BP:</span> ${portfolio ? portfolio.buying_power.toLocaleString() : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">Equity:</span> ${portfolio ? portfolio.equity.toLocaleString() : '---'}</div>
                         </div>
                     </div>
 

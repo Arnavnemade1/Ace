@@ -14,6 +14,8 @@ export class PortfolioStreamer {
                 id: '63963cac-3336-44d5-b7b7-913a89beb74f', // fixed singleton row UUID
                 total_value: parseFloat(account.portfolio_value),
                 cash: parseFloat(account.cash),
+                buying_power: parseFloat(account.buying_power),
+                equity: parseFloat(account.equity),
                 positions: positions.map((p: any) => ({
                     symbol: p.symbol,
                     qty: parseFloat(p.qty),

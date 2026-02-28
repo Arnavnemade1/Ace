@@ -79,8 +79,8 @@ export class RiskController {
                     console.log(`[Risk Guard] Blocking NAKED SELL for ${s.symbol}. No active position found.`);
                     continue;
                 }
-                if (hasOpenOrder) {
-                    console.log(`[Risk Guard] Blocking redundant SELL for ${s.symbol}. Open order already exists.`);
+                if (hasOpenOrder || this.recentlyPushed.has(s.symbol)) {
+                    console.log(`[Risk Guard] Blocking redundant SELL for ${s.symbol}. Open order already exists or was recently submitted.`);
                     continue;
                 }
             }
@@ -104,6 +104,10 @@ export class RiskController {
         const maxPerTrade = Math.min(equity * 0.05, buyingPower * 0.5, 5000); // Max 5% equity, 50% BP, or absolute $5000
 
         for (const signal of finalViable) {
+            // [x] Phase 35: Crypto Bypass (24/7 execution)
+            const isCrypto = signal.symbol.includes('/USD');
+            const canTradeNow = isMarketOpen || isCrypto;
+
             const price = signal.metadata?.price_observed || 0;
             if (price <= 0) continue;
 
@@ -116,7 +120,7 @@ export class RiskController {
             }
 
             try {
-                if (isMarketOpen) {
+                if (canTradeNow) {
                     // --- LIVE TRADING ---
                     await logAgentAction('Risk Controller', 'trade',
                         `EXECUTING ${signal.signal_type} ${signal.symbol} x${qty} | Reasoning: ${signal.reasoning}`
@@ -164,6 +168,8 @@ export class RiskController {
                     });
 
                     queued.push({ ...signal, qty, limit_price: limitPrice, order_id: order.id });
+
+                    // [x] Phase 34: Local Session Memory
                     this.recentlyPushed.add(signal.symbol);
 
                     await supabase.from('trades').insert({

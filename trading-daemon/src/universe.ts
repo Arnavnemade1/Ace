@@ -42,7 +42,10 @@ export const TRADING_UNIVERSE = [
     'SPY', 'QQQ', 'IWM', 'DIA', 'VIX', 'GLD', 'SLV', 'TLT', 'USO', 'BITO', 'ARKK', 'SMH', 'XLE', 'XLF', 'XLK', 'XLV',
 
     // --- RECENT IPOs / VOLATILE ---
-    'RDDT', 'ARM', 'CART', 'KVUE', 'MNCH', 'SPCE', 'NKLA', 'PLUG', 'QS', 'SOUN', 'BBAI', 'GFAI'
+    'RDDT', 'ARM', 'CART', 'KVUE', 'MNCH', 'SPCE', 'NKLA', 'PLUG', 'QS', 'SOUN', 'BBAI', 'GFAI',
+
+    // --- CRYPTO (24/7 TRADING) ---
+    'BTC/USD', 'ETH/USD', 'LTC/USD', 'BCH/USD', 'DOGE/USD'
 ];
 
 export const SECTORS: { [key: string]: string[] } = {

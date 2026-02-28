@@ -15,6 +15,7 @@ export interface GlobalPulse {
     weatherRisk: number;
     trafficDensity: number;
     macroSummary: string;
+    newsHeadlines: string[];
 }
 
 export class OmniScanner {
@@ -56,6 +57,7 @@ export class OmniScanner {
         const adsb = this.results['FLIGHT_TRAFFIC_NYC'] || {};
 
         // 1. Synthesize Sentiment (Check for keywords in headlines)
+        const headlines = news.map(n => (n.title || '')).filter(Boolean);
         const text = news.map(n => (n.title || n.description || '')).join(' ').toLowerCase();
         const bullish = (text.match(/surge|up|bull|gain|growth|positive|rally/g) || []).length;
         const bearish = (text.match(/drop|down|bear|loss|negative|crash|inflation/g) || []).length;
@@ -76,7 +78,8 @@ export class OmniScanner {
             newsSentiment,
             weatherRisk,
             trafficDensity,
-            macroSummary: `Sentiment: ${newsSentiment > 0.6 ? 'Optimistic' : (newsSentiment < 0.4 ? 'Cautions' : 'Stable')} | Weather Risk: ${(weatherRisk * 100).toFixed(0)}% | Logistics: ${(trafficDensity * 100).toFixed(0)}%`
+            macroSummary: `Sentiment: ${newsSentiment > 0.6 ? 'Optimistic' : (newsSentiment < 0.4 ? 'Cautions' : 'Stable')} | Weather Risk: ${(weatherRisk * 100).toFixed(0)}% | Logistics: ${(trafficDensity * 100).toFixed(0)}%`,
+            newsHeadlines: headlines
         };
     }
 

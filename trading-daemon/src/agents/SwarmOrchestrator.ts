@@ -172,7 +172,7 @@ export class SwarmOrchestrator {
 
         // 4. Strategy evaluation with full Market Pulse and Position Awareness
         await logAgentAction('Strategy Engine', 'info', 'Neural Strategy Synthesis in Progress...');
-        const signals = await this.strategy.evaluate(this.watchlist, pulse, activeSymbols);
+        const signals = await this.strategy.evaluate(this.watchlist, pulse, activeSymbols, account, positions);
 
         // 5. Execute top signals with Dynamic Risk Guardrails (Phase 31)
         let executionResult: any = null;
