@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { supabase } from '../supabase';
+import { logAgentAction, supabase } from '../supabase';
 
 const KEYS = {
     ALPHA_VANTAGE: process.env.ALPHA_VANTAGE_KEY,
@@ -102,9 +102,14 @@ export class OmniScanner {
             }
 
             // Maintain Supabase log for UI
-            await supabase.from('live_api_streams').insert({ source, symbol_or_context, payload });
-        } catch (e) {
+            const { error } = await supabase.from('live_api_streams').insert({ source, symbol_or_context, payload });
+            if (error) {
+                console.error(`[OmniScanner DB Error] ${source}: ${error.message}`);
+                await logAgentAction('OmniScanner', 'error', `live_api_streams insert failed: ${source}`, error.message);
+            }
+        } catch (e: any) {
             console.error(`[OmniScanner DB Error] ${source}`, e);
+            await logAgentAction('OmniScanner', 'error', `live_api_streams insert failed: ${source}`, e?.message || 'Unknown error');
         }
     }
 

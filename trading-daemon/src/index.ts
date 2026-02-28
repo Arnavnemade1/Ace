@@ -1,12 +1,19 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { logAgentAction } from './supabase';
+import { checkSupabaseConnection, logAgentAction } from './supabase';
 import { alpaca } from './alpaca';
 import { SwarmOrchestrator } from './agents/SwarmOrchestrator';
 import { CausalReplayArena } from './agents/CausalReplayArena';
 
 async function main() {
     console.log('🚀 Starting Autonomous Trading Daemon...');
+    const supabaseCheck = await checkSupabaseConnection();
+    if (!supabaseCheck.ok) {
+        console.error(`❌ Supabase connection failed: ${supabaseCheck.error}`);
+    } else {
+        console.log('✅ Supabase connection OK');
+    }
+
     await logAgentAction('Orchestrator', 'info', 'Daemon Booted', 'System initialized properly.');
 
     // Validate Alpaca connection

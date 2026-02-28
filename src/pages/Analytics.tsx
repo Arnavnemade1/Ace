@@ -375,6 +375,22 @@ const Analytics = () => {
         return () => { (supabase as any).removeChannel(channel); };
     }, []);
 
+    /* Agent Logs (handshake + diagnostics) */
+    useEffect(() => {
+        const channel = (supabase as any)
+            .channel('agent-logs-v1')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, (payload: any) => {
+                const row = payload.new;
+                const ts = new Date(row.created_at || Date.now()).toLocaleTimeString();
+                const tag = row.agent_name ? row.agent_name.toUpperCase() : 'AGENT';
+                const msg = row.message || 'Log';
+                setRawLogs(prev => [`${ts} ► [${tag}] ${msg}`, ...prev].slice(0, 50));
+            })
+            .subscribe();
+
+        return () => { (supabase as any).removeChannel(channel); };
+    }, []);
+
     const streamKeys = Object.keys(STREAMS);
 
     return (

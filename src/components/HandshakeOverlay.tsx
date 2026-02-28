@@ -7,23 +7,27 @@ export const HandshakeOverlay = () => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastHeartbeat, setLastHeartbeat] = useState<number>(0);
     const [isChecking, setIsChecking] = useState(true);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     useEffect(() => {
         // Initial check for recent activity (last 30 seconds)
         const checkConnection = async () => {
-            const { data } = await supabase
+            const { data, error } = await supabase
                 .from('agent_logs')
                 .select('created_at')
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            if (data) {
+            if (error) {
+                setErrorMsg(error.message);
+            } else if (data) {
                 const lastSeen = new Date(data.created_at).getTime();
                 const now = Date.now();
                 if (now - lastSeen < 30000) {
                     setIsConnected(true);
                     setLastHeartbeat(lastSeen);
+                    setErrorMsg(null);
                 }
             }
             setIsChecking(false);
@@ -36,6 +40,7 @@ export const HandshakeOverlay = () => {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, (payload) => {
                 setIsConnected(true);
                 setLastHeartbeat(Date.now());
+                setErrorMsg(null);
             })
             .subscribe();
 
@@ -71,7 +76,7 @@ export const HandshakeOverlay = () => {
                         </span>
                         <div className="h-2 w-px bg-white/10" />
                         <span className="text-[8px] font-mono text-white/30 uppercase tracking-tighter">
-                            Check npm run daemon
+                            {errorMsg ? `Supabase: ${errorMsg}` : 'Check npm run daemon'}
                         </span>
                     </div>
                 </motion.div>
