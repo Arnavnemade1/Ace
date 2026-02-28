@@ -128,7 +128,7 @@ export class SwarmOrchestrator {
             await logAgentAction('Risk Controller', 'info', `No actionable signals. Monitoring ${this.watchlist.length} symbols.`);
         }
 
-        // Discord brief every 10 cycles
+        // Discord brief every 10 cycles (10 minutes)
         if (this.cycleCounter % this.discordInterval === 0) {
             await this.postDiscordBrief(signals, executionResult, marketOpen, nowET);
         }
@@ -137,50 +137,47 @@ export class SwarmOrchestrator {
     }
 
     private async postDiscordBrief(signals: any[], executionResult: any, marketOpen: boolean, nowET: string) {
-        const topSignals = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 8);
+        const topSignals = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 10);
 
         const signalRows = topSignals.length > 0
             ? topSignals.map(s => {
                 const dir = s.signal_type === 'BUY' ? 'BUY ' : 'SELL';
                 const price = (s.metadata.price_observed || 0).toFixed(2).padStart(10);
-                const delta = ((s.metadata.price_change_pct || 0) >= 0 ? '+' : '')
-                    + (s.metadata.price_change_pct || 0).toFixed(2) + '%';
-                return `  ${dir}  ${s.symbol.padEnd(8)} ${price}  ${delta.padStart(8)}  ${s.strength}`;
+                return `  ${dir}  ${s.symbol.padEnd(8)} @ $${price} | Str: ${s.strength}`;
             }).join('\n')
-            : '  No high-conviction signals this window.';
+            : '  No significant signals detected this epoch.';
 
-        const orderRows = executionResult
+        const orderSummary = executionResult
             ? [
                 ...(executionResult.executed || []).map((e: any) =>
-                    `  EXECUTED  ${e.signal_type.padEnd(4)} ${e.symbol.padEnd(8)} x${String(e.qty).padStart(4)}  @ $${(e.metadata.price_observed || 0).toFixed(2)}`
+                    `✅ EXECUTED: ${e.signal_type} ${e.symbol} x${e.qty} @ $${(e.metadata.price_observed || 0).toFixed(2)}`
                 ),
                 ...(executionResult.queued || []).map((q: any) =>
-                    `  QUEUED    ${q.signal_type.padEnd(4)} ${q.symbol.padEnd(8)} x${String(q.qty).padStart(4)}  limit $${(q.limit_price || 0).toFixed(2)}  (GTC)`
+                    `⏳ QUEUED (GTC): ${q.signal_type} ${q.symbol} x${q.qty} limit $${(q.limit_price || 0).toFixed(2)}`
                 ),
-            ].join('\n') || '  No orders placed this window.'
-            : '  Execution window not reached.';
-
-        const nextExec = this.executionInterval - (this.cycleCounter % this.executionInterval);
+            ].join('\n') || 'No orders executed in this window.'
+            : 'Scanning for optimal entry/exit...';
 
         await DiscordDispatcher.postUpdate(
-            'ACE_OS — INTELLIGENCE BRIEF',
+            `ACE_OS Cycle Complete [Epoch ${this.cycleCounter}/30]`,
             [
-                `**Time:** ${nowET} ET     **Market:** ${marketOpen ? 'OPEN' : 'CLOSED'}     **Cycle:** ${this.cycleCounter}`,
-                `**Symbols Scanned:** ${this.watchlist.length}     **Signals Generated:** ${signals.length}     **Sentiment:** ${this.latestSentiment.toFixed(3)}`,
+                `**Active Monitoring:** ${this.watchlist.slice(0, 15).join(', ')}${this.watchlist.length > 15 ? '...' : ''}`,
+                `**Actionable Signals Found:** ${signals.length}`,
+                `**Status:** ${marketOpen ? 'TRADING ACTIVE' : 'AWAITING HORIZON (Span Penalty Active)'}`,
                 '',
-                '**Top Signals**',
+                '**Intelligence Analysis**',
                 '```',
-                '  SIDE  SYMBOL          PRICE      DELTA  STRENGTH',
-                '  ----  ------    -----------  ---------  --------',
                 signalRows,
                 '```',
-                '**Orders**',
+                '',
+                '**Execution Report**',
                 '```',
-                orderRows,
+                orderSummary,
                 '```',
-                `Next execution window in ${nextExec} minute(s).`,
+                '',
+                `*Next descriptive summary in ${this.discordInterval} minutes.*`
             ].join('\n'),
-            marketOpen ? 3066993 : 9807270
+            marketOpen ? 3066993 : 15844367
         );
     }
 }

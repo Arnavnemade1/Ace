@@ -103,39 +103,39 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9 }}
-            className="w-full max-w-4xl mt-32 mb-24 border-y border-white/[0.03] py-10"
+            className="w-full max-w-4xl mt-24 mb-20 border-y border-white/[0.03] py-8"
           >
-            <div className="grid grid-cols-2 md:grid-cols-4 items-center justify-between gap-y-10 gap-x-16 px-4">
-              <div className="space-y-2">
-                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
-                  <span className="w-1 h-1 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]" />
+            <div className="grid grid-cols-2 md:grid-cols-4 items-center justify-center gap-y-8 gap-x-12 px-4">
+              <div className="space-y-1.5 flex flex-col items-center text-center">
+                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]" />
                   Liquidity
                 </div>
-                <div className="text-2xl font-display font-bold text-white tracking-tighter">{displayValue}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tight">{displayValue}</div>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
+              <div className="space-y-1.5 flex flex-col items-center text-center">
+                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2 font-mono">
                   <ShieldCheck className="w-3 h-3 text-[#0ea5e9]" />
                   Operations
                 </div>
-                <div className="text-2xl font-display font-bold text-white tracking-tighter">{positionDisplay}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tight">{positionDisplay}</div>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
+              <div className="space-y-1.5 flex flex-col items-center text-center">
+                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2 font-mono">
                   <Activity className="w-3 h-3 text-[#ec4899]" />
                   Sensing
                 </div>
-                <div className="text-2xl font-display font-bold text-white tracking-tighter">{signalDisplay}</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tight">{signalDisplay}</div>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-[9px] text-white/20 uppercase tracking-[0.3em] flex items-center gap-2 font-mono">
+              <div className="space-y-1.5 flex flex-col items-center text-center">
+                <div className="text-[10px] text-white/20 uppercase tracking-[0.2em] flex items-center gap-2 font-mono">
                   <TrendingUp className="w-3 h-3 text-[#f97316]" />
                   Efficiency
                 </div>
-                <div className="text-2xl font-display font-bold text-white tracking-tighter">98.4%</div>
+                <div className="text-2xl font-display font-bold text-white tracking-tight">98.4%</div>
               </div>
             </div>
           </motion.div>
