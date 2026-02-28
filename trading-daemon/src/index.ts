@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import { logAgentAction } from './supabase';
 import { alpaca } from './alpaca';
 import { SwarmOrchestrator } from './agents/SwarmOrchestrator';

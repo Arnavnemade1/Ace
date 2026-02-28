@@ -42,7 +42,7 @@ const AgentOverview = () => {
           const stateData = data.find((d: any) => d.agent_name === a.name);
           return stateData ? {
             ...a,
-            status: stateData.status,
+            status: stateData.status as Agent["status"],
             metric: stateData.metric_value || '0',
             metricLabel: stateData.metric_label || '-',
           } : a;
