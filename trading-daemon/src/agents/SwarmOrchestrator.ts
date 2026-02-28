@@ -3,6 +3,7 @@ import { StrategyEngine } from './StrategyEngine';
 import { RiskController } from './RiskController';
 import { PortfolioStreamer } from './PortfolioStreamer';
 import { OmniScanner } from './OmniScanner';
+import { DiscordDispatcher } from './DiscordDispatcher';
 import { logAgentAction } from '../supabase';
 
 export class SwarmOrchestrator {
@@ -69,6 +70,13 @@ export class SwarmOrchestrator {
         } else {
             await logAgentAction('Risk Controller', 'info', `No actionable signals this cycle. Monitoring continues.`, JSON.stringify(marketData));
         }
+
+        // --- DISCORD HEARTBEAT ---
+        await DiscordDispatcher.postUpdate(
+            `🧠 ACE_OS Cycle Complete [Epoch ${this.executionEpochCounter}/${this.executionThreshold}]`,
+            `**Active Monitoring:** ${this.symbolsToMonitor.join(', ')}\n**Actionable Signals Found:** ${signals.length}\n**Status:** ${signals.length > 0 && this.executionEpochCounter < this.executionThreshold ? "AWAITING HORIZON (Span Penalty Active)" : "NOMINAL"}`,
+            3447003
+        );
 
         console.log(`--- Cycle Complete ---`);
     }

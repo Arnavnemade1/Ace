@@ -1,5 +1,6 @@
 import { logAgentAction, supabase } from '../supabase';
 import { alpaca } from '../alpaca';
+import { DiscordDispatcher } from './DiscordDispatcher';
 
 export class RiskController {
     private positionLimit = 5000; // max $5k per trade
@@ -16,6 +17,15 @@ export class RiskController {
 
             try {
                 await logAgentAction('Risk Controller', 'trade', `Approving ${signal.signal_type} for ${signal.symbol}. Sending to Alpaca...`);
+
+                // DISCORD ALERT
+                await DiscordDispatcher.postTradeAlert(
+                    signal.symbol,
+                    signal.signal_type.toUpperCase(),
+                    qty,
+                    signal.metadata.price_observed || 0,
+                    signal.reasoning || "Momentum Scalp Threshold Met"
+                );
 
                 const order = await alpaca.createOrder({
                     symbol: signal.symbol,
