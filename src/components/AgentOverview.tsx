@@ -1,99 +1,76 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import {
-  Activity,
-  BarChart3,
-  TrendingUp,
-  Shield,
-  Cpu,
-  RefreshCw,
-  Eye,
-  Target,
-} from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Eye, Target, Shield, Activity, BarChart3, RefreshCw, TrendingUp, Cpu } from "lucide-react";
 import type { ReactNode } from "react";
 
 interface Agent {
   name: string;
   role: string;
-  status: "active" | "idle" | "learning";
+  status: "active" | "idle" | "learning" | "error";
   icon: ReactNode;
   metric: string;
   metricLabel: string;
 }
 
-const agents: Agent[] = [
-  {
-    name: "Market Scanner",
-    role: "Real-time signal detection across US equities, ETFs & futures",
-    status: "active",
-    icon: <Eye className="w-5 h-5" />,
-    metric: "1,247",
-    metricLabel: "signals / hr",
-  },
-  {
-    name: "Strategy Engine",
-    role: "Multi-strategy allocation: momentum, mean-reversion, vol-arb",
-    status: "active",
-    icon: <Target className="w-5 h-5" />,
-    metric: "12",
-    metricLabel: "active strategies",
-  },
-  {
-    name: "Risk Controller",
-    role: "Portfolio-level risk management with dynamic position sizing",
-    status: "active",
-    icon: <Shield className="w-5 h-5" />,
-    metric: "0.8%",
-    metricLabel: "current VaR",
-  },
-  {
-    name: "Execution Agent",
-    role: "Alpaca paper trading with smart order routing & slippage control",
-    status: "active",
-    icon: <Activity className="w-5 h-5" />,
-    metric: "34",
-    metricLabel: "trades today",
-  },
-  {
-    name: "Sentiment Analyst",
-    role: "NLP-driven sentiment from news, filings & social feeds",
-    status: "active",
-    icon: <BarChart3 className="w-5 h-5" />,
-    metric: "0.72",
-    metricLabel: "bullish score",
-  },
-  {
-    name: "Causal Replay",
-    role: "Nightly self-improvement: replays decisions, prunes bad patterns",
-    status: "learning",
-    icon: <RefreshCw className="w-5 h-5" />,
-    metric: "8.2%",
-    metricLabel: "improvement rate",
-  },
-  {
-    name: "Portfolio Optimizer",
-    role: "Continuous rebalancing with Markowitz-enhanced allocation",
-    status: "active",
-    icon: <TrendingUp className="w-5 h-5" />,
-    metric: "1.34",
-    metricLabel: "Sharpe ratio",
-  },
-  {
-    name: "Orchestrator",
-    role: "Central coordination, conflict resolution & agent lifecycle mgmt",
-    status: "active",
-    icon: <Cpu className="w-5 h-5" />,
-    metric: "99.97%",
-    metricLabel: "uptime",
-  },
+const baseAgents = [
+  { name: "Market Scanner", role: "Real-time signal detection across US equities, ETFs & futures", icon: <Eye className="w-5 h-5" /> },
+  { name: "Strategy Engine", role: "Multi-strategy allocation: momentum, mean-reversion, vol-arb", icon: <Target className="w-5 h-5" /> },
+  { name: "Risk Controller", role: "Portfolio-level risk management with dynamic position sizing", icon: <Shield className="w-5 h-5" /> },
+  { name: "Execution Agent", role: "Alpaca paper trading with smart order routing & slippage control", icon: <Activity className="w-5 h-5" /> },
+  { name: "Sentiment Analyst", role: "NLP-driven sentiment from news, filings & social feeds", icon: <BarChart3 className="w-5 h-5" /> },
+  { name: "Causal Replay", role: "Nightly self-improvement: replays decisions, prunes bad patterns", icon: <RefreshCw className="w-5 h-5" /> },
+  { name: "Portfolio Optimizer", role: "Continuous rebalancing with Markowitz-enhanced allocation", icon: <TrendingUp className="w-5 h-5" /> },
+  { name: "Orchestrator", role: "Central coordination, conflict resolution & agent lifecycle mgmt", icon: <Cpu className="w-5 h-5" /> },
 ];
 
 const statusColors: Record<string, string> = {
   active: "bg-profit",
   idle: "bg-muted-foreground",
   learning: "bg-accent",
+  error: "bg-destructive",
 };
 
 const AgentOverview = () => {
+  const [agents, setAgents] = useState<Agent[]>(baseAgents.map(a => ({ ...a, status: 'idle', metric: '0', metricLabel: '-' })));
+
+  useEffect(() => {
+    const fetchState = async () => {
+      const { data } = await supabase.from('agent_state').select('*');
+      if (data) {
+        setAgents(prev => prev.map(a => {
+          const stateData = data.find((d: any) => d.agent_name === a.name);
+          return stateData ? {
+            ...a,
+            status: stateData.status,
+            metric: stateData.metric_value || '0',
+            metricLabel: stateData.metric_label || '-',
+          } : a;
+        }));
+      }
+    };
+
+    fetchState();
+
+    const channel = supabase.channel('public:agent_state')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'agent_state' }, (payload: any) => {
+        setAgents(prev => prev.map(a => {
+          if (a.name === payload.new.agent_name) {
+            return {
+              ...a,
+              status: payload.new.status,
+              metric: payload.new.metric_value || '0',
+              metricLabel: payload.new.metric_label || '-'
+            };
+          }
+          return a;
+        }));
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   return (
     <section className="relative py-32">
       <div className="container mx-auto px-6">

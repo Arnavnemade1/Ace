@@ -1,5 +1,7 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { ArrowUpRight, ArrowDownRight, Clock } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Trade {
   id: string;
@@ -12,18 +14,58 @@ interface Trade {
   agent: string;
 }
 
-const mockTrades: Trade[] = [
-  { id: "1", time: "14:32:08", symbol: "AAPL", side: "BUY", qty: 45, price: 189.42, agent: "Strategy Engine" },
-  { id: "2", time: "14:28:55", symbol: "XLE", side: "SELL", qty: 200, price: 92.18, pnl: 342.00, agent: "Portfolio Optimizer" },
-  { id: "3", time: "14:22:11", symbol: "CL=F", side: "BUY", qty: 10, price: 78.56, agent: "Market Scanner" },
-  { id: "4", time: "14:15:03", symbol: "SPY", side: "SELL", qty: 100, price: 512.84, pnl: -127.00, agent: "Risk Controller" },
-  { id: "5", time: "14:08:47", symbol: "NVDA", side: "BUY", qty: 30, price: 875.20, agent: "Strategy Engine" },
-  { id: "6", time: "13:55:22", symbol: "NG=F", side: "BUY", qty: 50, price: 2.847, agent: "Market Scanner" },
-  { id: "7", time: "13:42:18", symbol: "USO", side: "SELL", qty: 150, price: 76.33, pnl: 189.50, agent: "Portfolio Optimizer" },
-  { id: "8", time: "13:31:09", symbol: "TSLA", side: "BUY", qty: 20, price: 248.91, agent: "Strategy Engine" },
-];
-
 const LiveTradeFeed = () => {
+  const [trades, setTrades] = useState<Trade[]>([]);
+
+  useEffect(() => {
+    // Fetch initial trades
+    const fetchTrades = async () => {
+      const { data } = await supabase
+        .from('trades')
+        .select('*')
+        .order('executed_at', { ascending: false })
+        .limit(10);
+
+      if (data) {
+        setTrades(data.map((t: any) => ({
+          id: t.id,
+          time: new Date(t.executed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          symbol: t.symbol,
+          side: t.side,
+          qty: t.qty,
+          price: t.price,
+          pnl: t.pnl,
+          agent: t.agent
+        })));
+      }
+    };
+
+    fetchTrades();
+
+    // Subscribe to new trades
+    const channel = supabase
+      .channel('public:trades')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trades' }, (payload: any) => {
+        const t = payload.new;
+        const newTrade: Trade = {
+          id: t.id,
+          time: new Date(t.executed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          symbol: t.symbol,
+          side: t.side,
+          qty: t.qty,
+          price: t.price,
+          pnl: t.pnl,
+          agent: t.agent
+        };
+        setTrades(prev => [newTrade, ...prev].slice(0, 10)); // Keep only latest 10
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   return (
     <div className="glass-card overflow-hidden">
       <div className="px-6 py-4 border-b border-border/30 flex items-center justify-between">
@@ -37,13 +79,14 @@ const LiveTradeFeed = () => {
         </div>
       </div>
 
-      <div className="divide-y divide-border/20">
-        {mockTrades.map((trade, i) => (
+      <div className="divide-y divide-border/20 max-h-[400px] overflow-y-auto">
+        {trades.length === 0 ? (
+          <div className="p-6 text-center text-muted-foreground text-sm">Waiting for live trades...</div>
+        ) : trades.map((trade, i) => (
           <motion.div
             key={trade.id}
             initial={{ opacity: 0, x: -10 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
+            animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.04 }}
             className="px-6 py-3.5 flex items-center justify-between hover:bg-secondary/30 transition-colors"
           >
@@ -58,7 +101,7 @@ const LiveTradeFeed = () => {
             </div>
             <div className="flex items-center gap-4">
               <span className="text-xs text-muted-foreground hidden sm:block">{trade.agent}</span>
-              {trade.pnl !== undefined && (
+              {trade.pnl !== null && trade.pnl !== undefined && (
                 <span className={`text-xs font-medium ${trade.pnl >= 0 ? "profit-text" : "loss-text"}`}>
                   {trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)}
                 </span>
