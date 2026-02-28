@@ -12,13 +12,16 @@ export class SwarmOrchestrator {
 
     private symbolsToMonitor = ['AAPL', 'MSFT', 'TSLA', 'SPY', 'QQQ', 'NVDA', 'BTCUSD', 'ETHUSD'];
     private isRunning = false;
+    private executionEpochCounter = 0;
+    private executionThreshold = 30; // 30 minutes (60s * 30)
 
     async start() {
         this.isRunning = true;
-        await logAgentAction('Orchestrator', 'info', 'Swarm Orchestrator Started. Beginning 24/7 autonomous loop.');
+        await logAgentAction('Orchestrator', 'info', `Swarm Orchestrator Started. Monitoring 24/7. Execution Horizon: ${this.executionThreshold} mins.`);
 
         while (this.isRunning) {
             try {
+                this.executionEpochCounter++;
                 await this.runCycle();
             } catch (err: any) {
                 console.error('Cycle Error:', err);
@@ -37,23 +40,29 @@ export class SwarmOrchestrator {
     }
 
     private async runCycle() {
-        console.log(`\n--- [${new Date().toISOString()}] Starting Swarm Cycle ---`);
+        console.log(`\n--- [${new Date().toISOString()}] Starting Swarm Cycle (Epoch: ${this.executionEpochCounter}/${this.executionThreshold}) ---`);
 
         // 0. Stream Live Portfolio Info
         await this.portfolio.streamLiveData();
 
-        // 1. Gather Intelligence
+        // 1. Gather Intelligence (Every 60s)
         const macroIntel = await this.scanner.fetchMacroIntel();
         const marketData = await this.scanner.scanEquities(this.symbolsToMonitor);
 
-        // 2. Evaluate Strategy
+        // 2. Evaluate Strategy (Every 60s)
         const signals = await this.strategy.evaluate(marketData, macroIntel);
 
-        // 3. Risk Control & Execution
+        // 3. Risk Control & Execution (Only every 30-60 mins based on threshold)
         if (signals.length > 0) {
-            await this.risk.executeSignals(signals);
+            if (this.executionEpochCounter >= this.executionThreshold) {
+                await logAgentAction('Risk Controller', 'decision', `Execution Horizon Reached (${this.executionThreshold} mins). Sending ${signals.length} signals to Alpha execution.`);
+                await this.risk.executeSignals(signals);
+                this.executionEpochCounter = 0; // Reset after execution
+            } else {
+                await logAgentAction('Risk Controller', 'info', `Signals generated but delaying execution. Awaiting horizon confirmation (${this.executionThreshold - this.executionEpochCounter}m remaining).`);
+            }
         } else {
-            await logAgentAction('Risk Controller', 'info', 'No actionable signals this cycle.', JSON.stringify(marketData));
+            await logAgentAction('Risk Controller', 'info', `No actionable signals this cycle. Monitoring continues.`, JSON.stringify(marketData));
         }
 
         console.log(`--- Cycle Complete ---`);
