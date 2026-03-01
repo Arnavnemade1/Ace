@@ -10,7 +10,7 @@ const ALPACA_PAPER_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA_URL = "https://data.alpaca.markets";
 const NY_TZ = "America/New_York";
 const MIN_MINUTES_BETWEEN_TRADES = 30;
-const MIN_BUYING_POWER = 1000;
+const MIN_BUYING_POWER = 100;
 const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
 const MAX_TRADES_PER_DAY = 5;
@@ -215,9 +215,10 @@ serve(async (req) => {
       });
     }
 
+    const maxPerRun = strategyBias === "aggressive" ? 2 : 1;
     let processed = 0;
     for (const trade of pendingTrades) {
-      if (processed >= 1) break;
+      if (processed >= maxPerRun) break;
       try {
         if (openOrderSymbols.has(trade.symbol)) {
           await supabase.from("trades").update({

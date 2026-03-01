@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 const MIN_MINUTES_BETWEEN_TRADES = 30;
 const MAX_TRADES_PER_DAY = 5;
-const MIN_BUYING_POWER = 1000;
+const MIN_BUYING_POWER = 100;
 const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
 const MAX_OPEN_POSITIONS = 8;
@@ -68,9 +68,10 @@ serve(async (req) => {
       });
     }
 
-    const minStrength = strategyBias === "aggressive" ? 0.75 : strategyBias === "conservative" ? 0.9 : 0.8;
+    const minStrength = strategyBias === "aggressive" ? 0.6 : strategyBias === "conservative" ? 0.9 : 0.75;
     const minStrengthRecovery = Math.max(minStrength, 0.85);
     const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
+    const maxTradesPerCycle = strategyBias === "aggressive" ? 2 : 1;
 
     const { data: lastTrade } = await supabase
       .from("trades")
@@ -280,7 +281,7 @@ IMPORTANT RULES:
 
     if (toolCall?.function?.arguments) {
       const parsed = JSON.parse(toolCall.function.arguments);
-      decisions = (parsed.trades || []).slice(0, 1);
+      decisions = (parsed.trades || []).slice(0, maxTradesPerCycle);
     }
 
     // Budget-aware filtering: only BUY if strength is high and allocation fits live price
@@ -296,7 +297,7 @@ IMPORTANT RULES:
       if (buyingPower < MIN_BUYING_POWER) return false;
       if (cash < minCashBuffer) return false;
       if (heldSymbols.has(d.symbol)) return false;
-      if (recentlyTradedSymbols.has(d.symbol)) return false;
+      if (recentlyTradedSymbols.has(d.symbol) && strategyBias !== "aggressive") return false;
       if (currentPositions.length >= MAX_OPEN_POSITIONS) return false;
       if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(d.symbol)) return false;
       if (lossRecoveryMode && strength < minStrengthRecovery) return false;
@@ -312,10 +313,12 @@ IMPORTANT RULES:
     // Deterministic fallback if LLM returns no trades and strong signals exist
     if (decisions.length === 0) {
       const ordered = [...signals].sort((a, b) => Number(b.strength || 0) - Number(a.strength || 0));
+      const picked: any[] = [];
       for (const s of ordered) {
+        if (picked.length >= maxTradesPerCycle) break;
         const strength = Number(s.strength || 0);
         if (strength < minStrength) continue;
-        if (recentlyTradedSymbols.has(s.symbol)) continue;
+        if (recentlyTradedSymbols.has(s.symbol) && strategyBias !== "aggressive") continue;
         if (s.signal_type === "SELL" && !heldSymbols.has(s.symbol)) continue;
         if (s.signal_type === "BUY" && heldSymbols.has(s.symbol)) continue;
         if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(s.symbol)) continue;
@@ -325,20 +328,22 @@ IMPORTANT RULES:
         if (!price) continue;
         const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
         const qty = Math.max(1, Math.min(maxQty, 1));
-        decisions = [{
+        picked.push({
           symbol: s.symbol,
           side: s.signal_type === "SELL" ? "SELL" : "BUY",
           qty,
           strategy: "Deterministic Fallback",
           reasoning: s.metadata?.reasoning || s.metadata?.analysis || s.reasoning || "Fallback trade based on top-ranked signal strength.",
-        }];
+        });
+      }
+      if (picked.length > 0) {
+        decisions = picked;
         await supabase.from("agent_logs").insert({
           agent_name: "Strategy Engine",
           log_type: "decision",
-          message: `Fallback trade selected: ${decisions[0].side} ${decisions[0].symbol} (strength ${strength.toFixed(2)})`,
-          reasoning: decisions[0].reasoning,
+          message: `Fallback trades selected: ${picked.map((p) => `${p.side} ${p.symbol}`).join(", ")}`,
+          reasoning: picked.map((p) => `${p.symbol}: ${p.reasoning}`).join(" | "),
         });
-        break;
       }
     }
 
