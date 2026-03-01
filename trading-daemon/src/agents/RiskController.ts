@@ -4,7 +4,13 @@ import { DiscordDispatcher } from './DiscordDispatcher';
 
 export class RiskController {
     private positionLimit = 5000;     // max USD per trade
-    private strengthThreshold = 0.65; // minimum signal strength to act
+    private strengthThreshold = 0.7; // minimum signal strength to act
+    private buyStrengthThreshold = 0.8; // stricter BUY threshold
+    private maxTradesPerCycle = 1;
+    private minMinutesBetweenTrades = 10;
+    private minBuyingPower = 1000;
+    private cashBufferPct = 0.2; // keep 20% cash
+    private maxAllocationPct = 0.02; // max 2% equity per trade
 
     // [x] Phase 32: Symbol Fatigue & Manual Blacklist
     private SYMBOL_BLACKLIST = new Set(['HOOD', 'SOFI', 'ABBV']);
@@ -19,6 +25,7 @@ export class RiskController {
     }
 
     private recentlyPushed = new Set<string>();
+    private lastTradeLocalTs = 0;
 
     /**
      * [x] Phase 31: Dynamic Risk Gating
@@ -42,6 +49,25 @@ export class RiskController {
 
         if (signals.length === 0) return { executed, queued };
 
+        // Global cooldown: don't trade too frequently
+        const { data: lastTrade } = await supabase
+            .from('trades')
+            .select('created_at')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (lastTrade?.created_at) {
+            const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
+            if (ageMs < this.minMinutesBetweenTrades * 60 * 1000) {
+                await logAgentAction('Risk Controller', 'info', `Cooldown active: last trade ${Math.round(ageMs / 60000)}m ago. Skipping new orders.`);
+                return { executed, queued };
+            }
+        }
+        if (this.lastTradeLocalTs && Date.now() - this.lastTradeLocalTs < this.minMinutesBetweenTrades * 60 * 1000) {
+            await logAgentAction('Risk Controller', 'info', `Local cooldown active. Skipping new orders.`);
+            return { executed, queued };
+        }
+
         // 0. Account Health Guard
         const isHealthy = await this.validateAccount(account);
         if (!isHealthy) return { executed, queued };
@@ -52,6 +78,13 @@ export class RiskController {
         // 2. Ironclad Position Guard (Blocks duplicates, orders, and recent pushes)
         const posSymbols = new Set(currentPositions.map(p => p.symbol));
         const orderSymbols = new Set(openOrders.map(o => o.symbol));
+        const orderSidesBySymbol = new Map<string, Set<string>>();
+        for (const o of openOrders) {
+            const sym = o.symbol;
+            const side = (o.side || '').toLowerCase();
+            if (!orderSidesBySymbol.has(sym)) orderSidesBySymbol.set(sym, new Set());
+            if (side) orderSidesBySymbol.get(sym)!.add(side);
+        }
 
         const finalViable: any[] = [];
         for (const s of viable) {
@@ -70,6 +103,10 @@ export class RiskController {
                     console.log(`[Risk Guard] Blocking duplicate BUY for ${s.symbol}. Stock already in portfolio or traded in last 24h.`);
                     continue;
                 }
+                if (orderSidesBySymbol.get(s.symbol)?.has('sell')) {
+                    console.log(`[Risk Guard] Blocking BUY for ${s.symbol}. Existing SELL order open (wash-trade risk).`);
+                    continue;
+                }
             } else if (s.signal_type === 'SELL') {
                 // Sell-Side Guard: Only sell if we have a position to liquidate AND no open order
                 const hasPosition = posSymbols.has(s.symbol);
@@ -81,6 +118,10 @@ export class RiskController {
                 }
                 if (hasOpenOrder || this.recentlyPushed.has(s.symbol)) {
                     console.log(`[Risk Guard] Blocking redundant SELL for ${s.symbol}. Open order already exists or was recently submitted.`);
+                    continue;
+                }
+                if (orderSidesBySymbol.get(s.symbol)?.has('buy')) {
+                    console.log(`[Risk Guard] Blocking SELL for ${s.symbol}. Existing BUY order open (wash-trade risk).`);
                     continue;
                 }
             }
@@ -101,18 +142,37 @@ export class RiskController {
         // 4. Dynamic Lot Sizing based on Account Equity/Buying Power
         const equity = parseFloat(account.equity);
         const buyingPower = parseFloat(account.buying_power);
-        const maxPerTrade = Math.min(equity * 0.05, buyingPower * 0.5, 5000); // Max 5% equity, 50% BP, or absolute $5000
+        const cash = parseFloat(account.cash ?? account.buying_power ?? "0");
+        const minCashBuffer = equity * this.cashBufferPct;
+        const maxPerTrade = Math.min(equity * this.maxAllocationPct, buyingPower * 0.25, 5000); // 2% equity, 25% BP, or $5000
 
+        let executedThisCycle = 0;
         for (const signal of finalViable) {
+            if (buyingPower < this.minBuyingPower) {
+                await logAgentAction('Risk Controller', 'info', `Buying power below $${this.minBuyingPower}. Skipping trades.`);
+                break;
+            }
+            if (executedThisCycle >= this.maxTradesPerCycle) break;
             // [x] Phase 35: Crypto Bypass (24/7 execution)
             const isCrypto = signal.symbol.includes('/USD');
             const canTradeNow = isMarketOpen || isCrypto;
 
-            const price = signal.metadata?.price_observed || 0;
+            const price = await this.getLivePrice(signal.symbol, signal.metadata?.price_observed || 0);
             if (price <= 0) continue;
 
             const qty = Math.max(1, Math.floor(maxPerTrade / price));
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
+
+            if (side === 'buy') {
+                if (signal.strength < this.buyStrengthThreshold) {
+                    await logAgentAction('Risk Controller', 'info', `Skipping BUY ${signal.symbol}: strength ${signal.strength} below ${this.buyStrengthThreshold}.`);
+                    continue;
+                }
+                if (cash < minCashBuffer) {
+                    await logAgentAction('Risk Controller', 'info', `Cash buffer hit. Cash $${cash.toFixed(2)} < $${minCashBuffer.toFixed(2)}. Skipping BUY ${signal.symbol}.`);
+                    continue;
+                }
+            }
 
             if (qty * price > buyingPower && side === 'buy') {
                 await logAgentAction('Risk Controller', 'error', `INSOLVENT: Required $${(qty * price).toFixed(2)} exceeds $${buyingPower.toFixed(2)} Buying Power.`);
@@ -136,6 +196,8 @@ export class RiskController {
 
                     executed.push({ ...signal, qty, order_id: order.id, limit_price: price });
                     this.recentlyPushed.add(signal.symbol);
+                    this.lastTradeLocalTs = Date.now();
+                    executedThisCycle++;
 
                     await supabase.from('trades').insert({
                         symbol: signal.symbol,
@@ -152,7 +214,9 @@ export class RiskController {
                     await DiscordDispatcher.postTradeAlert(signal.symbol, signal.signal_type.toUpperCase() as 'BUY' | 'SELL', qty, price, signal.reasoning);
                 } else {
                     // --- PRE-ORDER MODE ---
-                    const limitPrice = side === 'buy' ? parseFloat((price * 1.005).toFixed(2)) : parseFloat((price * 0.995).toFixed(2));
+                    const limitPrice = side === 'buy'
+                        ? parseFloat((price * 1.001).toFixed(2))
+                        : parseFloat((price * 0.999).toFixed(2));
 
                     await logAgentAction('Risk Controller', 'info',
                         `PRE-ORDERING ${signal.symbol} x${qty} @ $${limitPrice} | Next market open GTC.`
@@ -171,6 +235,8 @@ export class RiskController {
 
                     // [x] Phase 34: Local Session Memory
                     this.recentlyPushed.add(signal.symbol);
+                    this.lastTradeLocalTs = Date.now();
+                    executedThisCycle++;
 
                     await supabase.from('trades').insert({
                         symbol: signal.symbol,
@@ -199,6 +265,17 @@ export class RiskController {
         }
 
         return { executed, queued };
+    }
+
+    private async getLivePrice(symbol: string, fallback: number): Promise<number> {
+        try {
+            const bars = await alpaca.getBars(symbol, new Date(Date.now() - 5 * 60 * 1000).toISOString(), '1Min', 1);
+            const last = bars[bars.length - 1];
+            const price = last?.ClosePrice || last?.close || 0;
+            return price > 0 ? price : fallback;
+        } catch {
+            return fallback;
+        }
     }
 
     private async hasTradedRecently(symbol: string, side: string): Promise<boolean> {

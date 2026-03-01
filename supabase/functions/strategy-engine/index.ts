@@ -5,6 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+const MIN_MINUTES_BETWEEN_TRADES = 10;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -20,6 +21,26 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Strategy Engine");
+
+    const { data: lastTrade } = await supabase
+      .from("trades")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastTrade?.created_at) {
+      const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
+      if (ageMs < MIN_MINUTES_BETWEEN_TRADES * 60 * 1000) {
+        await supabase.from("agent_logs").insert({
+          agent_name: "Strategy Engine",
+          log_type: "info",
+          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago). No new trades recommended.`,
+        });
+        return new Response(JSON.stringify({ success: true, decisions: [] }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Fetch unacted signals
     const { data: signals } = await supabase
@@ -73,6 +94,7 @@ serve(async (req) => {
     const portfolioValue = portfolio?.total_value || 100000;
     const cash = portfolio?.cash || 100000;
     const currentPositions = portfolio?.positions || [];
+    const maxAllocation = portfolioValue * 0.02;
 
     const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Positions: ${JSON.stringify(currentPositions)}`;
 
@@ -80,7 +102,7 @@ serve(async (req) => {
       `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
     ).join("\n") || "No recent trades";
 
-    // AI decides which signals to act on — NO COOLDOWNS
+    // AI decides which signals to act on — selective
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -92,16 +114,16 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are the Strategy Engine of an aggressive autonomous paper trading system. You run three strategies:
+            content: `You are the Strategy Engine of an autonomous paper trading system. You run three strategies:
 1. Momentum: Follow strong trends (signal strength > 0.6)
 2. Mean Reversion: Fade overextended moves
 3. Volatility Arbitrage: Trade vol spikes
 
 IMPORTANT RULES:
-- NO waiting periods or cooldowns. Trade whenever opportunities exist.
-- Size positions appropriately: use real prices to calculate qty (max 10% of portfolio per trade)
-- It's OK to open NEW positions — be aggressive on paper trading
-- Multiple trades per cycle are fine
+- Be selective and avoid overtrading. If signals are weak, return no trades.
+- Max 1 trade per cycle.
+- Prefer signals with strength >= 0.7.
+- Size positions appropriately: use real prices to calculate qty (max 5% of portfolio per trade)
 - Consider existing positions to avoid over-concentration
 - Calculate qty based on real prices: qty = floor(allocation / price)`,
           },
@@ -151,8 +173,22 @@ IMPORTANT RULES:
 
     if (toolCall?.function?.arguments) {
       const parsed = JSON.parse(toolCall.function.arguments);
-      decisions = parsed.trades || [];
+      decisions = (parsed.trades || []).slice(0, 1);
     }
+
+    // Budget-aware filtering: only BUY if strength is high and allocation fits live price
+    const signalStrengthBySymbol = new Map((signals || []).map((s) => [s.symbol, Number(s.strength || 0)]));
+    decisions = decisions.filter((d) => {
+      if (d.side !== "BUY") return true;
+      const strength = signalStrengthBySymbol.get(d.symbol) || 0;
+      if (strength < 0.8) return false;
+      const snap = snapshots[d.symbol];
+      const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
+      if (!price) return false;
+      const maxQty = Math.max(1, Math.floor(maxAllocation / price));
+      d.qty = Math.min(d.qty, maxQty);
+      return d.qty >= 1;
+    });
 
     // Mark signals as acted on
     const signalIds = signals.map((s) => s.id);

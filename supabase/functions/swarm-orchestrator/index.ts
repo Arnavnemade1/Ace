@@ -7,6 +7,19 @@ const corsHeaders = {
 };
 
 const GET_SECRET = (key: string) => Deno.env.get(key) || "";
+const NY_TZ = "America/New_York";
+const MIN_MINUTES_BETWEEN_TRADES = 10;
+const MIN_BUYING_POWER = 1000;
+const CASH_BUFFER_PCT = 0.2;
+const MAX_ALLOCATION_PCT = 0.02;
+
+function isMarketOpen(): boolean {
+    const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
+    const day = nowNY.getDay();
+    if (day === 0 || day === 6) return false;
+    const minutes = nowNY.getHours() * 60 + nowNY.getMinutes();
+    return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+}
 
 serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -34,6 +47,26 @@ serve(async (req) => {
 
         if (!ALPACA_KEY || !ALPACA_SECRET) throw new Error("Missing Alpaca API credentials.");
 
+        const { data: lastTrade } = await supabase
+            .from("trades")
+            .select("created_at")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (lastTrade?.created_at) {
+            const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
+            if (ageMs < MIN_MINUTES_BETWEEN_TRADES * 60 * 1000) {
+                await supabase.from("agent_logs").insert({
+                    agent_name: "Swarm Orchestrator",
+                    log_type: "info",
+                    message: `Cooldown active (${Math.round(ageMs / 60000)}m ago). Skipping cycle.`,
+                });
+                return new Response(JSON.stringify({ success: true, message: "Cooldown active" }), {
+                    headers: { ...corsHeaders, "Content-Type": "application/json" }
+                });
+            }
+        }
+
         // 1. FETCH CONTEXT
         const [accRes, posRes, ordersRes] = await Promise.all([
             fetch(`${ALPACA_URL}/v2/account`, { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } }),
@@ -50,6 +83,23 @@ serve(async (req) => {
         const positions = await posRes.json();
         const openOrders = await ordersRes.json();
         const currentHoldings = Array.isArray(positions) ? positions.map((p: any) => p.symbol) : [];
+        const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
+        const equity = parseFloat(account.equity || "0");
+        const cash = parseFloat(account.cash || "0");
+        const buyingPower = parseFloat(account.buying_power || "0");
+        const minCashBuffer = equity * CASH_BUFFER_PCT;
+        const maxAllocation = equity * MAX_ALLOCATION_PCT;
+
+        if (buyingPower < MIN_BUYING_POWER) {
+            await supabase.from("agent_logs").insert({
+                agent_name: "Swarm Orchestrator",
+                log_type: "info",
+                message: `Buying power below $${MIN_BUYING_POWER}. Skipping cycle.`,
+            });
+            return new Response(JSON.stringify({ success: true, message: "Insufficient buying power" }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+        }
 
         console.log(`Equity: $${account.equity}, Positions: ${currentHoldings.length}, Cash: $${account.cash}`);
 
@@ -88,7 +138,7 @@ serve(async (req) => {
             } catch (e) { console.error("News fetch failed", e); }
         }
 
-        // 4. BRAIN SYNTHESIS — aggressive, data-driven, no cooldowns
+        // 4. BRAIN SYNTHESIS — selective, data-driven
         if (!LOVABLE_API_KEY) {
             console.warn("LOVABLE_API_KEY missing.");
             return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), { status: 401 });
@@ -99,11 +149,14 @@ serve(async (req) => {
             messages: [
                 {
                     role: "system",
-                    content: `You are the Omni-Brain of ACE_OS, an aggressive autonomous paper trading system. 
+                    content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system. 
 You make REAL trades on Alpaca Paper. Your goal: MAXIMIZE RETURNS through smart, data-driven decisions.
 
 RULES:
-- You CAN and SHOULD open new positions. No artificial cooldowns or waiting periods.
+- Be selective. If conviction < 0.8, return HOLD.
+- Only ONE trade maximum per cycle.
+- Do NOT trade symbols with open orders.
+- If market is closed, only place LIMIT orders (no market orders).
 - Analyze the REAL market data, prices, volumes, and day changes provided.
 - Consider news sentiment when making decisions.
 - Max 15% of equity per position for risk management.
@@ -111,7 +164,6 @@ RULES:
 - Consider momentum, mean reversion, breakouts, and sector rotation.
 - If a stock is down significantly and fundamentals are strong → consider BUY.
 - If a stock is up big with weakening momentum → consider taking profit (SELL).
-- Be decisive. Paper trading — learn aggressively.
 
 Return JSON: {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, "reasoning": "string", "conviction": 0.0-1.0}
 - For BUY: pick the best opportunity from the watchlist
@@ -124,6 +176,7 @@ Return JSON: {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, 
                     content: `PORTFOLIO: $${account.equity} equity, $${account.cash} cash, $${account.buying_power} buying power
 POSITIONS: ${currentHoldings.length > 0 ? currentHoldings.join(", ") : "NONE"}
 OPEN ORDERS: ${Array.isArray(openOrders) ? openOrders.length : 0}
+MARKET OPEN: ${isMarketOpen() ? "YES" : "NO"}
 
 REAL-TIME MARKET DATA:
 ${marketContext}
@@ -161,22 +214,51 @@ Analyze and make your trading decision. Be aggressive but smart.`
         // 5. EXECUTE TRADE
         let tradeResult = `Decision: ${decision.action} — ${decision.reasoning}`;
         let tradeExecuted = false;
+        const marketOpen = isMarketOpen();
+        const snap = snapshots[symbol];
+        const bid = snap?.latestQuote?.bp;
+        const ask = snap?.latestQuote?.ap;
+        const lastTrade = snap?.latestTrade?.p || snap?.dailyBar?.c;
+        const refPrice = decision.action === "BUY" ? (ask || lastTrade) : (bid || lastTrade);
+
+        if (decision.conviction < 0.8) {
+            decision.action = "HOLD";
+            tradeResult = `HOLD (low conviction) — ${decision.reasoning}`;
+        }
+        if (openOrderSymbols.has(symbol)) {
+            decision.action = "HOLD";
+            tradeResult = `HOLD (open order exists for ${symbol})`;
+        }
+        if (decision.action === "BUY" && cash < minCashBuffer) {
+            decision.action = "HOLD";
+            tradeResult = `HOLD (cash buffer: $${cash.toFixed(2)} < $${minCashBuffer.toFixed(2)})`;
+        }
+        if (decision.action === "BUY" && refPrice) {
+            const maxQty = Math.max(1, Math.floor(maxAllocation / refPrice));
+            decision.qty = Math.min(qty, maxQty);
+        }
+
+        const effectiveQty = Math.max(1, Math.min(decision.qty || qty, 20));
 
         if (decision.action === "BUY" && parseFloat(account.buying_power) > 100) {
+            if (!marketOpen && !refPrice) {
+                tradeResult = "ORDER SKIPPED: No live quote for limit pricing.";
+            } else {
             const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
                 method: "POST",
                 headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     symbol: symbol.replace("/", ""),
-                    qty: String(qty),
+                    qty: String(effectiveQty),
                     side: "buy",
-                    type: "market",
-                    time_in_force: "day"
+                    type: marketOpen ? "market" : "limit",
+                    time_in_force: marketOpen ? "day" : "gtc",
+                    limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 1.001).toFixed(2))
                 })
             });
             if (orderRes.ok) {
                 const orderData = await orderRes.json();
-                tradeResult = `EXECUTED BUY: ${qty} ${symbol}`;
+                tradeResult = `EXECUTED BUY: ${effectiveQty} ${symbol}`;
                 tradeExecuted = true;
 
                 // Wait for fill
@@ -194,7 +276,7 @@ Analyze and make your trading decision. Be aggressive but smart.`
 
                 // Record trade
                 await supabase.from("trades").insert({
-                    symbol, side: "BUY", qty, price: fillPrice, total_value: fillPrice * qty,
+                    symbol, side: "BUY", qty: effectiveQty, price: fillPrice, total_value: fillPrice * effectiveQty,
                     agent: "Omni-Brain", strategy: "AI Synthesis",
                     reasoning: decision.reasoning, status: "executed",
                     alpaca_order_id: orderData.id,
@@ -202,7 +284,7 @@ Analyze and make your trading decision. Be aggressive but smart.`
 
                 await sendDiscord("", [{
                     title: `🟢 BUY EXECUTED — ${symbol}`,
-                    description: `**Qty:** ${qty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Total:** $${(fillPrice * qty).toFixed(2)}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%\n**Reasoning:** ${decision.reasoning}`,
+                    description: `**Qty:** ${effectiveQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Total:** $${(fillPrice * effectiveQty).toFixed(2)}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%\n**Reasoning:** ${decision.reasoning}`,
                     color: 0x00ff41,
                     footer: { text: "ACE_OS Omni-Brain" },
                     timestamp: new Date().toISOString(),
@@ -212,10 +294,14 @@ Analyze and make your trading decision. Be aggressive but smart.`
                 tradeResult = `ORDER FAILED: ${errText}`;
                 await sendDiscord(`❌ BUY ORDER FAILED for ${symbol}: ${errText}`);
             }
+            }
         } else if (decision.action === "SELL" && currentHoldings.includes(symbol)) {
             const posData = positions.find((p: any) => p.symbol === symbol);
-            const sellQty = Math.min(qty, parseInt(posData?.qty || "0"));
+            const sellQty = Math.min(effectiveQty, parseInt(posData?.qty || "0"));
             if (sellQty > 0) {
+                if (!marketOpen && !refPrice) {
+                    tradeResult = "ORDER SKIPPED: No live quote for limit pricing.";
+                } else {
                 const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
                     method: "POST",
                     headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
@@ -223,8 +309,9 @@ Analyze and make your trading decision. Be aggressive but smart.`
                         symbol: symbol.replace("/", ""),
                         qty: String(sellQty),
                         side: "sell",
-                        type: "market",
-                        time_in_force: "day"
+                        type: marketOpen ? "market" : "limit",
+                        time_in_force: marketOpen ? "day" : "gtc",
+                        limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 0.999).toFixed(2))
                     })
                 });
                 if (orderRes.ok) {
@@ -261,6 +348,7 @@ Analyze and make your trading decision. Be aggressive but smart.`
                 } else {
                     const errText = await orderRes.text();
                     tradeResult = `SELL FAILED: ${errText}`;
+                }
                 }
             }
         } else if (decision.action === "HOLD") {
@@ -300,7 +388,7 @@ Analyze and make your trading decision. Be aggressive but smart.`
         await supabase.from("agent_logs").insert({
             agent_name: "Swarm Orchestrator",
             log_type: "decision",
-            message: `${decision.action} ${qty} ${symbol} — ${tradeResult}`,
+            message: `${decision.action} ${effectiveQty} ${symbol} — ${tradeResult}`,
             reasoning: decision.reasoning,
             metadata: { decision, tradeResult, symbol, tradeExecuted }
         });

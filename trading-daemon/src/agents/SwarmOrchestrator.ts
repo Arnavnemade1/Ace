@@ -30,7 +30,7 @@ export class SwarmOrchestrator {
     private isRunning = false;
     private cycleCounter = 0;
     private discordInterval = 30;   // Discord brief every 30 minutes
-    private executionInterval = 1;  // Execute signals every cycle (1m) — INSTANT TRADING
+    private executionInterval = 3;  // Execute signals every 3 cycles (cooldown)
     private latestSentiment = 0.5;
 
     async start() {
@@ -177,7 +177,7 @@ export class SwarmOrchestrator {
         // 5. Execute top signals with Dynamic Risk Guardrails (Phase 31)
         let executionResult: any = null;
         if (this.cycleCounter % this.executionInterval === 0 && signals.length > 0) {
-            const topSignals = signals.sort((a, b) => b.strength - a.strength).slice(0, 5);
+            const topSignals = signals.sort((a, b) => b.strength - a.strength).slice(0, 1);
             await logAgentAction('Risk Controller', 'decision',
                 `Execution window reached. Pulse: ${pulse.newsSentiment.toFixed(2)} | Active Positions: ${activeSymbols.size}`
             );
