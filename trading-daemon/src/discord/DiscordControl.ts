@@ -19,11 +19,13 @@ function parseKeywords(raw: string) {
         .replace(/[^a-z0-9\s]/g, ' ')
         .split(/\s+/)
         .filter(Boolean)
-        .slice(0, 2);
+        .map(t => t.trim());
 
     if (tokens.length === 0) return null;
-    if (!tokens.every(t => ALL_KEYWORDS.has(t))) return null;
-    return tokens;
+
+    const keywords = Array.from(new Set(tokens.filter(t => ALL_KEYWORDS.has(t))));
+    if (keywords.length === 0) return null;
+    return keywords.slice(0, 2);
 }
 
 export async function startDiscordControl() {
