@@ -23,6 +23,8 @@ serve(async (req) => {
     const baseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const DISCORD_WEBHOOK_URL = Deno.env.get("DISCORD_WEBHOOK_URL");
+    const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
+    const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
     const NY_TZ = "America/New_York";
     const DAILY_TRADE_CAP = 5;
 
@@ -138,7 +140,23 @@ serve(async (req) => {
       : 0;
     const includeDeepThoughts = !lastJournalAt || (Date.now() - lastJournalAt) >= 30 * 60 * 1000;
     let journalSummary = "";
+    let briefMessage = "";
     if (includeDeepThoughts) {
+      let marketLine = "Market: UNKNOWN";
+      try {
+        if (ALPACA_API_KEY && ALPACA_API_SECRET) {
+          const clockRes = await fetch("https://paper-api.alpaca.markets/v2/clock", {
+            headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+          });
+          if (clockRes.ok) {
+            const clock = await clockRes.json();
+            marketLine = `Market: ${clock.is_open ? "OPEN" : "CLOSED"} | Next ${clock.is_open ? "close" : "open"}: ${clock.is_open ? clock.next_close : clock.next_open}`;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       const { data: portfolio } = await supabase
         .from("portfolio_state")
         .select("total_value, cash, daily_pnl, max_drawdown, positions, updated_at")
@@ -158,11 +176,16 @@ serve(async (req) => {
         .eq("acted_on", false)
         .gte("expires_at", new Date().toISOString())
         .order("strength", { ascending: false })
-        .limit(6);
+        .limit(10);
 
       const watchList = (watchSignals || [])
         .map((s: any) => `${s.symbol} ${String(s.signal_type || "signal").toUpperCase()} (${Number(s.strength || 0).toFixed(2)})`)
         .join(", ");
+      const strengths = (watchSignals || []).map((s: any) => Number(s.strength || 0)).filter((n) => Number.isFinite(n));
+      const meanStrength = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length : 0;
+      const variance = strengths.length ? strengths.reduce((a, b) => a + Math.pow(b - meanStrength, 2), 0) / strengths.length : 0;
+      const stdev = Math.sqrt(variance);
+      const sentimentScore = results.find((r) => r.function === "sentiment-analyst")?.data?.sentiment?.overall_score;
 
       const { data: lastDecision } = await supabase
         .from("agent_logs")
@@ -192,10 +215,10 @@ serve(async (req) => {
 
       const roadmap = [
         "Roadmap: scan broad market + news for high-strength signals.",
-        "Wait for conviction ≥ 0.8 and respect cooldown + daily cap.",
-        "Size entries ≤ 2% equity with 25% cash buffer.",
+        "Rank opportunities by signal strength and liquidity regime.",
+        "Allocate up to 2% equity per trade; stop when buying power tightens.",
         "If market closed, queue GTC limits for open.",
-        "If P/L < -1% or drawdown ≥ 3%, switch to low-risk ETFs.",
+        "Rotate to top decile signals each 30-minute window.",
       ].join(" ");
 
       const { data: journals } = await supabase
@@ -220,12 +243,22 @@ serve(async (req) => {
 
       journalSummary = [
         portfolioLine,
+        `**${marketLine}**`,
+        `**Signal Stats:** n=${strengths.length} | mean=${meanStrength.toFixed(2)} | stdev=${stdev.toFixed(2)} | sentiment=${sentimentScore ?? "n/a"}`,
         investLine,
         whyLine,
         thoughtLine,
         `**${roadmap}**`,
         "",
         journalSummary ? "**Agent Journals**\n" + journalSummary : "",
+      ].filter(Boolean).join("\n");
+
+      briefMessage = [
+        `🧮 **ACE Quant Brief — ${mode.toUpperCase()}**`,
+        `**Status:** ${successCount}/${results.length} ok in ${totalDuration}ms`,
+        `**Last Trade:** ${formatAgo(lastTrade?.created_at)} | **Reset In:** ${resetHours}h ${resetMins}m`,
+        "",
+        journalSummary,
       ].filter(Boolean).join("\n");
     }
 
@@ -240,25 +273,9 @@ serve(async (req) => {
       return `• ${r.function}: ${r.success ? "OK" : "FAIL"} ${extra}`.trim();
     });
 
-    const capLine = executedCount >= DAILY_TRADE_CAP
-      ? `**Daily Cap:** ${executedCount}/${DAILY_TRADE_CAP} (HIT)`
-      : `**Daily Cap:** ${executedCount}/${DAILY_TRADE_CAP}`;
-    const resetLine = `**Reset In:** ${resetHours}h ${resetMins}m`;
-    const lastTradeLine = `**Last Trade:** ${formatAgo(lastTrade?.created_at)}`;
-
-    const agentLines = summaryLines.map((line) => `- ${line.replace(/^•\s?/, "")}`);
-
-    await sendDiscord(
-      [
-        `🛰️ **ACE Orchestrator — ${mode.toUpperCase()}**`,
-        `**Status:** ${successCount}/${results.length} ok in ${totalDuration}ms`,
-        `${capLine} • ${resetLine} • ${lastTradeLine}`,
-        "",
-        "**Agent Results**",
-        ...agentLines,
-        includeDeepThoughts && journalSummary ? `\n**Journal (30m)**\n${journalSummary}` : "",
-      ].filter(Boolean).join("\n")
-    );
+    if (includeDeepThoughts && briefMessage) {
+      await sendDiscord(briefMessage);
+    }
 
     await supabase.from("agent_logs").insert({
       agent_name: "Orchestrator",

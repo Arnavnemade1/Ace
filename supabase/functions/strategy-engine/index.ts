@@ -54,8 +54,6 @@ serve(async (req) => {
     const riskProfile = String(directive.risk_profile || "standard");
     const tradingEnabled = directive.trading_enabled !== false;
 
-    const minMinutesBetweenTrades = strategyBias === "aggressive" ? 10 : strategyBias === "conservative" ? 60 : MIN_MINUTES_BETWEEN_TRADES;
-
     if (!tradingEnabled) {
       await supabase.from("agent_logs").insert({
         agent_name: "Strategy Engine",
@@ -68,48 +66,10 @@ serve(async (req) => {
       });
     }
 
-    const minStrength = strategyBias === "aggressive" ? 0.6 : strategyBias === "conservative" ? 0.9 : 0.75;
+    const minStrength = strategyBias === "aggressive" ? 0.45 : strategyBias === "conservative" ? 0.9 : 0.7;
     const minStrengthRecovery = Math.max(minStrength, 0.85);
     const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
-    const maxTradesPerCycle = strategyBias === "aggressive" ? 2 : 1;
-
-    const { data: lastTrade } = await supabase
-      .from("trades")
-      .select("created_at")
-      .eq("status", "executed")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (lastTrade?.created_at) {
-      const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
-      if (ageMs < minMinutesBetweenTrades * 60 * 1000) {
-        await supabase.from("agent_logs").insert({
-          agent_name: "Strategy Engine",
-          log_type: "info",
-          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago, min ${minMinutesBetweenTrades}m). No new trades recommended.`,
-        });
-        return new Response(JSON.stringify({ success: true, decisions: [] }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentExecutions } = await supabase
-      .from("trades")
-      .select("id")
-      .eq("status", "executed")
-      .gte("created_at", dayAgo);
-    if ((recentExecutions?.length || 0) >= MAX_TRADES_PER_DAY) {
-      await supabase.from("agent_logs").insert({
-        agent_name: "Strategy Engine",
-        log_type: "info",
-        message: `Daily trade cap reached (${MAX_TRADES_PER_DAY}). Skipping new recommendations.`,
-      });
-      return new Response(JSON.stringify({ success: true, decisions: [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const maxTradesPerCycle = signals?.length || 25;
 
     // Fetch unacted signals
     const { data: signals } = await supabase
@@ -130,12 +90,7 @@ serve(async (req) => {
       .order("executed_at", { ascending: false })
       .limit(10);
 
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentSymbols } = await supabase
-      .from("trades")
-      .select("symbol")
-      .gte("created_at", oneDayAgo);
-    const recentlyTradedSymbols = new Set((recentSymbols || []).map((t: any) => t.symbol));
+    const recentlyTradedSymbols = new Set();
 
     // Fetch real prices from Alpaca for sizing
     let snapshots: Record<string, any> = {};
@@ -188,7 +143,6 @@ serve(async (req) => {
     const buyingPower = Number(account?.buying_power || portfolio?.buying_power || cash);
     const currentPositions = positions.length > 0 ? positions : (portfolio?.positions || []);
     const maxAllocation = portfolioValue * MAX_ALLOCATION_PCT;
-    const minCashBuffer = portfolioValue * CASH_BUFFER_PCT;
     const dailyPnl = account?.last_equity
       ? Number(account.equity) - Number(account.last_equity)
       : Number(portfolio?.daily_pnl || 0);
@@ -229,8 +183,7 @@ IMPORTANT RULES:
 - Be selective and avoid overtrading. If signals are weak, return no trades.
 - Max 1 trade per cycle.
 - Prefer signals with strength >= ${minStrength}.
-- Do NOT recommend new BUYs if cash buffer is below ${CASH_BUFFER_PCT * 100}% of equity.
-- Do NOT recommend trades if buying power is below $${MIN_BUYING_POWER}.
+- Respect buying power and avoid over-sizing.
 - Consider existing positions to avoid over-concentration.
 - Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.
 - LOSS RECOVERY MODE: if active, only consider low-risk symbols (${Array.from(LOW_RISK_SYMBOLS).join(", ")}) and size at 1% of equity.
@@ -295,13 +248,6 @@ IMPORTANT RULES:
       const snap = snapshots[d.symbol];
       const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
       if (!price) return false;
-      if (buyingPower < MIN_BUYING_POWER) return false;
-      if (cash < minCashBuffer) return false;
-      if (heldSymbols.has(d.symbol)) return false;
-      if (recentlyTradedSymbols.has(d.symbol) && strategyBias !== "aggressive") return false;
-      if (currentPositions.length >= MAX_OPEN_POSITIONS) return false;
-      if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(d.symbol)) return false;
-      if (lossRecoveryMode && strength < minStrengthRecovery) return false;
       const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
       d.qty = Math.min(d.qty, maxQty);
       return d.qty >= 1;
@@ -319,11 +265,7 @@ IMPORTANT RULES:
         if (picked.length >= maxTradesPerCycle) break;
         const strength = Number(s.strength || 0);
         if (strength < minStrength) continue;
-        if (recentlyTradedSymbols.has(s.symbol) && strategyBias !== "aggressive") continue;
         if (s.signal_type === "SELL" && !heldSymbols.has(s.symbol)) continue;
-        if (s.signal_type === "BUY" && heldSymbols.has(s.symbol)) continue;
-        if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(s.symbol)) continue;
-        if (lossRecoveryMode && strength < minStrengthRecovery) continue;
         const snap = snapshots[s.symbol];
         const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
         if (!price) continue;
@@ -391,7 +333,7 @@ IMPORTANT RULES:
         `Directive: ${strategyBias}/${riskProfile}`,
         `Market: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"}`,
         `Signals reviewed: ${signals.length}, Trades recommended: ${decisions.length}`,
-        `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)} | Buying power: $${buyingPower.toFixed(2)}`,
+        `Buying power: $${buyingPower.toFixed(2)}`,
         `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
         lossRecoveryMode
           ? "Focus: low-risk symbols only; reduce size and protect capital until recovery."

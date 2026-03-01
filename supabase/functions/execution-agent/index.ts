@@ -9,15 +9,8 @@ const corsHeaders = {
 const ALPACA_PAPER_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA_URL = "https://data.alpaca.markets";
 const NY_TZ = "America/New_York";
-const MIN_MINUTES_BETWEEN_TRADES = 30;
 const MIN_BUYING_POWER = 100;
-const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
-const MAX_TRADES_PER_DAY = 5;
-const MAX_OPEN_POSITIONS = 8;
-const LOSS_RECOVERY_PNL_PCT = -0.01;
-const LOSS_RECOVERY_MAX_DRAWDOWN = 0.03;
-const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
 function isMarketOpen(): boolean {
   const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
@@ -84,8 +77,6 @@ serve(async (req) => {
     const strategyBias = String(directive.strategy_bias || "balanced");
     const riskProfile = String(directive.risk_profile || "standard");
     const tradingEnabled = directive.trading_enabled !== false;
-    const minMinutesBetweenTrades = strategyBias === "aggressive" ? 10 : strategyBias === "conservative" ? 60 : MIN_MINUTES_BETWEEN_TRADES;
-
     if (!tradingEnabled) {
       await supabase.from("agent_logs").insert({
         agent_name: "Execution Agent",
@@ -98,44 +89,7 @@ serve(async (req) => {
       });
     }
 
-    // Cooldown check
-    const { data: lastTrade } = await supabase
-      .from("trades")
-      .select("created_at")
-      .eq("status", "executed")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (lastTrade?.created_at) {
-      const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
-      if (ageMs < minMinutesBetweenTrades * 60 * 1000) {
-        await supabase.from("agent_logs").insert({
-          agent_name: "Execution Agent",
-          log_type: "info",
-          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago, min ${minMinutesBetweenTrades}m). Skipping execution.`,
-        });
-        return new Response(JSON.stringify({ success: true, message: "Cooldown active" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: executedToday } = await supabase
-      .from("trades")
-      .select("id")
-      .eq("status", "executed")
-      .gte("created_at", dayAgo);
-    if ((executedToday?.length || 0) >= MAX_TRADES_PER_DAY) {
-      await supabase.from("agent_logs").insert({
-        agent_name: "Execution Agent",
-        log_type: "info",
-        message: `Daily trade cap reached (${MAX_TRADES_PER_DAY}). Skipping execution.`,
-      });
-      return new Response(JSON.stringify({ success: true, message: "Daily trade cap" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // No cooldown or daily caps; only buying power governs execution.
 
     // Fetch approved pending trades
     const { data: pendingTrades } = await supabase
@@ -183,25 +137,18 @@ serve(async (req) => {
     const equity = account ? parseFloat(account.equity) : 0;
     const cash = account ? parseFloat(account.cash) : 0;
     const buyingPower = account ? parseFloat(account.buying_power) : 0;
-    const minCashBuffer = equity * CASH_BUFFER_PCT;
-    const dailyPnl = account?.last_equity ? (parseFloat(account.equity) - parseFloat(account.last_equity)) : 0;
-    const dailyPnlPct = account?.last_equity ? dailyPnl / parseFloat(account.last_equity) : 0;
     const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
-    const forceLowRisk = riskProfile === "minimal";
-    const lossRecoveryMode = forceLowRisk || dailyPnlPct <= LOSS_RECOVERY_PNL_PCT;
-    const maxAllocation = lossRecoveryMode ? equity * 0.01 : Math.min(equity * 0.03, equity * MAX_ALLOCATION_PCT * allocationMultiplier);
+    const maxAllocation = Math.min(equity * 0.03, equity * MAX_ALLOCATION_PCT * allocationMultiplier);
     const positionSymbols = new Set(Array.isArray(positions) ? positions.map((p: any) => p.symbol) : []);
-    const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
 
     await supabase.from("agent_logs").insert({
       agent_name: "Execution Agent",
       log_type: "learning",
       message: "Journal — Execution posture",
       reasoning: [
-        `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Mode: NORMAL`,
         `Directive: ${strategyBias}/${riskProfile}`,
-        `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
-        `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)}`,
+        `Buying power: $${buyingPower.toFixed(2)}`,
       ].join(" | "),
     });
 
@@ -216,35 +163,15 @@ serve(async (req) => {
       });
     }
 
-    const maxPerRun = strategyBias === "aggressive" ? 2 : 1;
     let processed = 0;
     for (const trade of pendingTrades) {
-      if (processed >= maxPerRun) break;
       try {
-        if (openOrderSymbols.has(trade.symbol)) {
+        if (trade.side === "BUY" && buyingPower < MIN_BUYING_POWER) {
           await supabase.from("trades").update({
             status: "failed",
-            reasoning: "Skipped: open order exists for this symbol (wash-trade risk).",
-          }).eq("id", trade.id);
-          results.push({ trade_id: trade.id, status: "failed", error: "open order exists" });
-          continue;
-        }
-
-        if (trade.side === "BUY" && (cash < minCashBuffer || buyingPower < MIN_BUYING_POWER)) {
-          await supabase.from("trades").update({
-            status: "failed",
-            reasoning: "Skipped: insufficient buying power or cash buffer.",
+            reasoning: "Skipped: insufficient buying power.",
           }).eq("id", trade.id);
           results.push({ trade_id: trade.id, status: "failed", error: "insufficient funds" });
-          continue;
-        }
-
-        if (trade.side === "BUY" && positionSymbols.size >= MAX_OPEN_POSITIONS && !positionSymbols.has(trade.symbol)) {
-          await supabase.from("trades").update({
-            status: "failed",
-            reasoning: "Skipped: max open positions reached.",
-          }).eq("id", trade.id);
-          results.push({ trade_id: trade.id, status: "failed", error: "max positions" });
           continue;
         }
 
@@ -257,14 +184,6 @@ serve(async (req) => {
           continue;
         }
 
-        if (trade.side === "BUY" && lossRecoveryMode && !LOW_RISK_SYMBOLS.has(trade.symbol)) {
-          await supabase.from("trades").update({
-            status: "failed",
-            reasoning: "Skipped: loss recovery mode restricts buys to low-risk symbols.",
-          }).eq("id", trade.id);
-          results.push({ trade_id: trade.id, status: "failed", error: "loss recovery restriction" });
-          continue;
-        }
 
         const snap = await fetchSnapshot(trade.symbol, ALPACA_API_KEY, ALPACA_API_SECRET);
         const bid = snap?.latestQuote?.bp;
@@ -281,14 +200,6 @@ serve(async (req) => {
         }
 
         if (trade.side === "BUY") {
-          if (cash < minCashBuffer) {
-            await supabase.from("trades").update({
-              status: "failed",
-              reasoning: "Skipped: cash buffer too low for new buys.",
-            }).eq("id", trade.id);
-            results.push({ trade_id: trade.id, status: "failed", error: "cash buffer" });
-            continue;
-          }
           const maxQty = Math.max(1, Math.floor(maxAllocation / refPrice));
           if (maxQty < 1) {
             await supabase.from("trades").update({
@@ -333,15 +244,6 @@ serve(async (req) => {
           console.error(`Alpaca order error for ${trade.symbol}:`, errText);
           await supabase.from("trades").update({ status: "failed", reasoning: `Alpaca rejected: ${errText}` }).eq("id", trade.id);
           results.push({ trade_id: trade.id, status: "failed", error: errText });
-
-          if (DISCORD_WEBHOOK_URL) {
-            await sendDiscord(DISCORD_WEBHOOK_URL, "", [{
-              title: `❌ ORDER FAILED: ${trade.side} ${trade.qty} ${trade.symbol}`,
-              description: `**Reason:** ${errText}\n**Strategy:** ${trade.strategy || "N/A"}`,
-              color: 0xff0000,
-              timestamp: new Date().toISOString(),
-            }]);
-          }
           continue;
         }
 
@@ -395,21 +297,19 @@ serve(async (req) => {
           metadata: { order_id: order.id, fill_price: fillPrice, strategy: trade.strategy },
         });
 
-        // Discord notification
-        if (DISCORD_WEBHOOK_URL) {
-          const emoji = trade.side === "BUY" ? "🟢" : "🔴";
-          const color = trade.side === "BUY" ? 0x00ff41 : 0xff4444;
+        // Discord notification: BUY only
+        if (DISCORD_WEBHOOK_URL && trade.side === "BUY") {
+          const priceLine = fillPrice ? `Filled @ $${fillPrice.toFixed(2)}` : `Limit @ $${orderBody.limit_price || refPrice}`;
           await sendDiscord(DISCORD_WEBHOOK_URL, "", [{
-            title: `${emoji} ${trade.side} EXECUTED — ${trade.symbol}`,
+            title: `✅ BUY EXECUTED — ${trade.symbol}`,
             description: [
-              `**Qty:** ${trade.qty} shares`,
-              `**Fill Price:** $${fillPrice.toFixed(2)}`,
-              `**Total Value:** $${(fillPrice * trade.qty).toFixed(2)}`,
-              `**Strategy:** ${trade.strategy || "N/A"}`,
-              `**Reasoning:** ${trade.reasoning || "AI-driven decision"}`,
-              `**Alpaca Order:** \`${order.id}\``,
-            ].join("\n"),
-            color,
+              `Qty: ${trade.qty}`,
+              priceLine,
+              `Market: ${marketOpen ? "OPEN" : "CLOSED"}`,
+              `Buying Power: $${buyingPower.toFixed(2)}`,
+              trade.reasoning ? `Signal: ${trade.reasoning}` : "",
+            ].filter(Boolean).join("\n"),
+            color: 0x00ff41,
             footer: { text: "ACE_OS Execution Agent" },
             timestamp: new Date().toISOString(),
           }]);
@@ -466,23 +366,7 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       }).not("id", "is", null);
 
-      // Discord portfolio summary
-      if (DISCORD_WEBHOOK_URL && results.some(r => r.status === "executed")) {
-        const totalPnl = parseFloat(account.equity) - parseFloat(account.last_equity);
-        await sendDiscord(DISCORD_WEBHOOK_URL, "", [{
-          title: "📊 Portfolio Update",
-          description: [
-            `**Equity:** $${parseFloat(account.equity).toLocaleString()}`,
-            `**Cash:** $${parseFloat(account.cash).toLocaleString()}`,
-            `**Daily P&L:** ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`,
-            `**Open Positions:** ${formattedPositions.length}`,
-            formattedPositions.map(p => `  • ${p.symbol}: ${p.qty} @ $${p.current_price.toFixed(2)} (${p.unrealized_pnl >= 0 ? "+" : ""}$${p.unrealized_pnl.toFixed(2)})`).join("\n"),
-          ].join("\n"),
-          color: totalPnl >= 0 ? 0x00ff41 : 0xff4444,
-          footer: { text: "ACE_OS Portfolio Sync" },
-          timestamp: new Date().toISOString(),
-        }]);
-      }
+      // No Discord portfolio summaries; only BUY executions send notifications.
     }
 
     const executed = results.filter((r) => r.status === "executed").length;

@@ -1,7 +1,12 @@
 import axios from 'axios';
 
 export class DiscordDispatcher {
+    private static enabled() {
+        return process.env.DISCORD_DAEMON_ENABLED === 'true';
+    }
+
     static async postUpdate(title: string, description: string, color: number = 3447003) {
+        if (!this.enabled()) return;
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
         try {
@@ -20,6 +25,7 @@ export class DiscordDispatcher {
     }
 
     static async postTradeAlert(symbol: string, action: 'BUY' | 'SELL', qty: number, price: number, reasoning: string) {
+        if (!this.enabled()) return;
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
         const color = action === 'BUY' ? 3066993 : 15158332;
@@ -48,6 +54,7 @@ export class DiscordDispatcher {
     }
 
     static async postQueueAlert(symbol: string, action: 'BUY' | 'SELL', qty: number, limitPrice: number, reasoning: string) {
+        if (!this.enabled()) return;
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
         const color = 9807270; // neutral grey for queued

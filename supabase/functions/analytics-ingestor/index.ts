@@ -42,7 +42,6 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const DISCORD_WEBHOOK_URL = Deno.env.get("DISCORD_WEBHOOK_URL");
 
     const { data: scanState } = await supabase
       .from("agent_state")
@@ -132,15 +131,7 @@ serve(async (req) => {
       metadata: { symbols_sampled: symbols.length, symbols, sources: rows.map((r) => r.source) },
     });
 
-    if (DISCORD_WEBHOOK_URL) {
-      await fetch(DISCORD_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: `🧠 Analytics Ingestor updated ${rows.length} feeds (sampled ${symbols.length} symbols)`,
-        }),
-      });
-    }
+    // Discord updates suppressed; 30-minute brief is handled by orchestrator.
 
     return new Response(JSON.stringify({ success: true, rows: rows.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
