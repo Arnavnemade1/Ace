@@ -76,6 +76,7 @@ serve(async (req) => {
     const { data: lastTrade } = await supabase
       .from("trades")
       .select("created_at")
+      .eq("status", "executed")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
