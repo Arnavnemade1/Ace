@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Terminal, Database, Activity, Wifi, Cpu, Eye, BarChart3, Clock } from "lucide-react";
+import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock } from "lucide-react";
 
 interface AgentLog {
     id: string;
@@ -14,8 +14,32 @@ interface AgentLog {
 const AgentArena = () => {
     const [logs, setLogs] = useState<AgentLog[]>([]);
     const [portfolio, setPortfolio] = useState<any>(null);
+    const [alpacaAccount, setAlpacaAccount] = useState<any>(null);
+    const [alpacaPositions, setAlpacaPositions] = useState<any[]>([]);
+    const [alpacaOrders, setAlpacaOrders] = useState<any[]>([]);
+    const [marketClock, setMarketClock] = useState<any>(null);
+    const [syncStatus, setSyncStatus] = useState<{ status: 'idle' | 'syncing' | 'error'; lastSynced?: Date; error?: string }>({ status: 'idle' });
     const [neuralLoad, setNeuralLoad] = useState(20);
     const [currentAction, setCurrentAction] = useState("SYNTHESIZING...");
+    const [assetClassFilter, setAssetClassFilter] = useState("All");
+    const [sideFilter, setSideFilter] = useState("All");
+    const [showAllPositions, setShowAllPositions] = useState(false);
+    const [showAllOrders, setShowAllOrders] = useState(false);
+
+    const toNum = (v: any) => {
+        const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
+        return Number.isFinite(n) ? n : 0;
+    };
+
+    const formatMoney = (v: any, digits = 2) => {
+        const n = toNum(v);
+        return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    };
+
+    const formatAssetClass = (ac?: string) => {
+        if (!ac) return "Unknown";
+        return ac.replace(/_/g, " ").toUpperCase();
+    };
 
     useEffect(() => {
         // Fetch recent thoughts
@@ -80,6 +104,66 @@ const AgentArena = () => {
         return () => { supabase.removeChannel(channel); supabase.removeChannel(portChannel); };
     }, []);
 
+    useEffect(() => {
+        let mounted = true;
+        const fetchAlpaca = async () => {
+            setSyncStatus(prev => ({ ...prev, status: 'syncing' }));
+            try {
+                const { data, error } = await supabase.functions.invoke('market-data', {
+                    body: { symbols: ["SPY", "QQQ", "AAPL", "NVDA", "MSFT", "AMZN", "META", "TSLA", "XLE", "USO"] }
+                });
+
+                if (error || data?.error) {
+                    if (!mounted) return;
+                    setSyncStatus(prev => ({
+                        ...prev,
+                        status: 'error',
+                        error: error?.message || data?.error || 'Failed to sync Alpaca'
+                    }));
+                    return;
+                }
+
+                if (!mounted) return;
+                setAlpacaAccount(data?.account || null);
+                setAlpacaPositions(Array.isArray(data?.positions) ? data.positions : []);
+                setAlpacaOrders(Array.isArray(data?.orders) ? data.orders : []);
+                setMarketClock(data?.clock || null);
+                setSyncStatus({ status: 'idle', lastSynced: new Date() });
+            } catch (e: any) {
+                if (!mounted) return;
+                setSyncStatus(prev => ({ ...prev, status: 'error', error: e?.message || 'Failed to sync Alpaca' }));
+            }
+        };
+
+        fetchAlpaca();
+        const iv = setInterval(fetchAlpaca, 30000);
+        return () => { mounted = false; clearInterval(iv); };
+    }, []);
+
+    const alpacaReady = Boolean(syncStatus.lastSynced) || alpacaAccount !== null || marketClock !== null;
+    const account = alpacaReady ? alpacaAccount : portfolio;
+    const positions = alpacaReady ? alpacaPositions : (portfolio?.positions || []);
+    const orders = alpacaReady ? alpacaOrders : (portfolio?.orders || []);
+
+    const assetClassOptions = ["All", ...Array.from(new Set((positions || []).map((p: any) => p.asset_class || "us_equity")))];
+    const sideOptions = ["All", ...Array.from(new Set((positions || []).map((p: any) => p.side || "long")))];
+
+    const filteredPositions = (positions || []).filter((p: any) => {
+        const ac = p.asset_class || "us_equity";
+        const sd = p.side || "long";
+        return (assetClassFilter === "All" || ac === assetClassFilter) && (sideFilter === "All" || sd === sideFilter);
+    });
+
+    const sortedPositions = [...filteredPositions].sort((a, b) => toNum(b.market_value) - toNum(a.market_value));
+    const displayPositions = showAllPositions ? sortedPositions : sortedPositions.slice(0, 6);
+
+    const sortedOrders = [...(orders || [])].sort((a, b) => {
+        const ta = new Date(a.submitted_at || 0).getTime();
+        const tb = new Date(b.submitted_at || 0).getTime();
+        return tb - ta;
+    });
+    const displayOrders = showAllOrders ? sortedOrders : sortedOrders.slice(0, 10);
+
     return (
         <div className="min-h-screen bg-background overflow-x-hidden pt-24 pb-12">
             <div className="container mx-auto px-6">
@@ -94,11 +178,22 @@ const AgentArena = () => {
                     <div className="glass-card p-6 flex flex-col justify-center items-center text-center col-span-1 border-primary/20 bg-primary/5">
                         <Database className="w-8 h-8 text-primary mb-3 opacity-80" />
                         <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-1">Live Portfolio Value</p>
-                        <h2 className="text-4xl font-display font-bold profit-text glow-text">${portfolio ? portfolio.total_value.toLocaleString() : '---'}</h2>
+                        <h2 className="text-4xl font-display font-bold profit-text glow-text">
+                            ${account ? formatMoney(account.equity ?? account.total_value ?? account.portfolio_value ?? account.cash ?? 0, 2) : '---'}
+                        </h2>
                         <div className="mt-3 flex gap-4 text-sm opacity-80">
-                            <div><span className="text-muted-foreground mr-1">Cash:</span> ${portfolio ? portfolio.cash.toLocaleString() : '---'}</div>
-                            <div><span className="text-muted-foreground mr-1">BP:</span> ${portfolio ? portfolio.buying_power.toLocaleString() : '---'}</div>
-                            <div><span className="text-muted-foreground mr-1">Equity:</span> ${portfolio ? portfolio.equity.toLocaleString() : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">Cash:</span> ${account ? formatMoney(account.cash ?? 0, 2) : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">BP:</span> ${account ? formatMoney(account.buying_power ?? 0, 2) : '---'}</div>
+                            <div><span className="text-muted-foreground mr-1">Equity:</span> ${account ? formatMoney(account.equity ?? 0, 2) : '---'}</div>
+                        </div>
+                        <div className="mt-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+                            {marketClock ? (
+                                <span className="inline-flex items-center gap-2">
+                                    <Clock className="w-3 h-3" />
+                                    {marketClock.is_open ? "Market Open" : "Market Closed"} · Next {marketClock.is_open ? "Close" : "Open"}:{" "}
+                                    {new Date(marketClock.is_open ? marketClock.next_close : marketClock.next_open).toLocaleString()}
+                                </span>
+                            ) : "Market clock unavailable"}
                         </div>
                     </div>
 
@@ -121,55 +216,162 @@ const AgentArena = () => {
                         <div className="absolute top-0 right-0 p-4 opacity-10"><Wifi className="w-32 h-32" /></div>
                         <div className="flex items-center gap-3 mb-4 z-10">
                             <Activity className="text-primary w-5 h-5" />
-                            <h3 className="font-display font-semibold text-lg">
-                                Neural Trade Stream ({portfolio?.positions?.length || 0})
-                                {portfolio?.orders?.length > 0 && <span className="ml-3 text-xs font-mono text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{portfolio.orders.length} PENDING</span>}
-                            </h3>
+                            <h3 className="font-display font-semibold text-lg">Alpaca Sync Status</h3>
                         </div>
-                        <div className="overflow-x-auto z-10">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 z-10">
+                            <div className="rounded-lg border border-border/50 bg-black/30 p-4">
+                                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Sync State</p>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-xs font-mono px-2 py-1 rounded border ${syncStatus.status === 'error' ? 'border-red-500/40 text-red-300 bg-red-500/10' : syncStatus.status === 'syncing' ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'}`}>
+                                        {syncStatus.status === 'error' ? 'ERROR' : syncStatus.status === 'syncing' ? 'SYNCING' : 'LIVE'}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {syncStatus.lastSynced ? `Last synced ${syncStatus.lastSynced.toLocaleTimeString()}` : 'Awaiting first sync'}
+                                    </span>
+                                </div>
+                                {syncStatus.error && <p className="mt-2 text-xs text-red-300">{syncStatus.error}</p>}
+                            </div>
+                            <div className="rounded-lg border border-border/50 bg-black/30 p-4">
+                                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Portfolio Overview</p>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-muted-foreground">Positions</span>
+                                    <span className="font-mono text-primary">{positions.length}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm mt-2">
+                                    <span className="text-muted-foreground">Orders</span>
+                                    <span className="font-mono text-amber-400">{orders.length}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 mb-10">
+                    <div className="glass-card p-6 overflow-hidden border border-primary/10">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                            <div className="flex items-center gap-3">
+                                <BarChart3 className="text-primary w-5 h-5" />
+                                <h3 className="font-display font-semibold text-foreground tracking-wide">Top Positions</h3>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                                <label className="flex items-center gap-2 text-muted-foreground">
+                                    Asset Class
+                                    <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={assetClassFilter} onChange={(e) => setAssetClassFilter(e.target.value)}>
+                                        {assetClassOptions.map((opt) => (
+                                            <option key={opt} value={opt}>{opt === "All" ? "All" : formatAssetClass(opt)}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="flex items-center gap-2 text-muted-foreground">
+                                    Side
+                                    <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={sideFilter} onChange={(e) => setSideFilter(e.target.value)}>
+                                        {sideOptions.map((opt) => (
+                                            <option key={opt} value={opt}>{opt === "All" ? "All" : opt.toUpperCase()}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <button className="text-primary/80 hover:text-primary transition-colors text-xs font-mono" onClick={() => setShowAllPositions(v => !v)}>
+                                    {showAllPositions ? "Collapse" : "View All"}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left">
                                 <thead className="text-xs text-muted-foreground uppercase border-b border-border/50">
                                     <tr>
-                                        <th className="px-4 py-2 font-medium">Symbol</th>
+                                        <th className="px-4 py-2 font-medium">Asset</th>
+                                        <th className="px-4 py-2 font-medium">Price</th>
                                         <th className="px-4 py-2 font-medium">Qty</th>
-                                        <th className="px-4 py-2 font-medium">Status / Price</th>
                                         <th className="px-4 py-2 font-medium">Market Value</th>
-                                        <th className="px-4 py-2 font-medium text-right">Unrealized P&L</th>
+                                        <th className="px-4 py-2 font-medium text-right">Total P/L ($)</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border/20">
-                                    {/* Active Positions */}
-                                    {portfolio?.positions?.map((pos: any, idx: number) => (
-                                        <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.05 }} key={pos.symbol} className="hover:bg-secondary/30 transition-colors">
-                                            <td className="px-4 py-3 font-semibold font-display text-foreground">{pos.symbol}</td>
-                                            <td className="px-4 py-3">{pos.qty}</td>
-                                            <td className="px-4 py-3">${pos.current_price?.toFixed(2)}</td>
-                                            <td className="px-4 py-3 font-medium">${pos.market_value?.toLocaleString()}</td>
-                                            <td className={`px-4 py-3 text-right font-medium ${pos.unrealized_pl >= 0 ? 'profit-text' : 'loss-text'}`}>
-                                                {pos.unrealized_pl >= 0 ? '+' : ''}${pos.unrealized_pl?.toFixed(2)}
-                                                <span className="text-xs ml-1 opacity-70">({(pos.unrealized_plpc * 100).toFixed(2)}%)</span>
-                                            </td>
-                                        </motion.tr>
-                                    ))}
-
-                                    {/* Pending Orders */}
-                                    {portfolio?.orders?.map((ord: any, idx: number) => (
-                                        <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: (portfolio?.positions?.length || 0) * 0.05 + idx * 0.05 }} key={`${ord.symbol}-${ord.status}-${idx}`} className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors opacity-80 italic">
-                                            <td className="px-4 py-3 font-semibold font-display text-amber-500/80">{ord.symbol}</td>
-                                            <td className="px-4 py-3">{ord.qty}</td>
-                                            <td className="px-4 py-3">
-                                                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-amber-500/20 rounded mr-2 border border-amber-500/30">{ord.status}</span>
-                                                {ord.side?.toUpperCase()} @ ${ord.limit_price?.toFixed(2) || 'MKT'}
-                                            </td>
-                                            <td className="px-4 py-3 font-medium opacity-60">${((ord.limit_price || 0) * ord.qty).toLocaleString()}</td>
-                                            <td className="px-4 py-3 text-right font-medium text-muted-foreground/50">— PENDING —</td>
-                                        </motion.tr>
-                                    ))}
-
-                                    {(!portfolio?.positions?.length && !portfolio?.orders?.length) && (
+                                    {displayPositions.map((pos: any, idx: number) => {
+                                        const currentPrice = toNum(pos.current_price || pos.lastday_price || pos.avg_entry_price);
+                                        const qty = toNum(pos.qty);
+                                        const marketValue = toNum(pos.market_value) || currentPrice * qty;
+                                        const pnl = toNum(pos.unrealized_pl ?? pos.unrealized_intraday_pl ?? 0) + toNum(pos.realized_pl ?? 0);
+                                        return (
+                                            <motion.tr key={`${pos.symbol}-${idx}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.03 }} className="hover:bg-secondary/30 transition-colors">
+                                                <td className="px-4 py-3 font-semibold font-display text-foreground">{pos.symbol}</td>
+                                                <td className="px-4 py-3">${formatMoney(currentPrice, 2)}</td>
+                                                <td className="px-4 py-3">{qty}</td>
+                                                <td className="px-4 py-3 font-medium">${formatMoney(marketValue, 2)}</td>
+                                                <td className={`px-4 py-3 text-right font-medium ${pnl >= 0 ? 'profit-text' : 'loss-text'}`}>
+                                                    {pnl >= 0 ? '+' : ''}${formatMoney(pnl, 2)}
+                                                </td>
+                                            </motion.tr>
+                                        );
+                                    })}
+                                    {displayPositions.length === 0 && (
                                         <tr>
                                             <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
-                                                No active positions or pending orders detected.
+                                                No open positions. Place some trades to see this table populate.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div className="glass-card p-6 overflow-hidden border border-primary/10">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                            <div className="flex items-center gap-3">
+                                <Terminal className="text-primary w-5 h-5" />
+                                <h3 className="font-display font-semibold text-foreground tracking-wide">Recent Orders</h3>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                <span className="px-2 py-1 rounded border border-border/60 bg-black/30">Cancel 0 selected</span>
+                                <span>0 rows selected</span>
+                                <span className="text-primary/80 hover:text-primary transition-colors cursor-pointer">Clear Selection</span>
+                                <button className="text-primary/80 hover:text-primary transition-colors text-xs font-mono" onClick={() => setShowAllOrders(v => !v)}>
+                                    {showAllOrders ? "Collapse" : "View All"}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-muted-foreground uppercase border-b border-border/50">
+                                    <tr>
+                                        <th className="px-4 py-2 font-medium">Asset</th>
+                                        <th className="px-4 py-2 font-medium">Order Type</th>
+                                        <th className="px-4 py-2 font-medium">Side</th>
+                                        <th className="px-4 py-2 font-medium">Qty</th>
+                                        <th className="px-4 py-2 font-medium">Filled Qty</th>
+                                        <th className="px-4 py-2 font-medium">Avg. Fill Price</th>
+                                        <th className="px-4 py-2 font-medium">Status</th>
+                                        <th className="px-4 py-2 font-medium">Source</th>
+                                        <th className="px-4 py-2 font-medium">Submitted At</th>
+                                        <th className="px-4 py-2 font-medium">Filled At</th>
+                                        <th className="px-4 py-2 font-medium">Expires At</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/20">
+                                    {displayOrders.map((ord: any, idx: number) => (
+                                        <motion.tr key={`${ord.id || ord.symbol}-${idx}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.02 }} className="hover:bg-secondary/30 transition-colors">
+                                            <td className="px-4 py-3 font-semibold font-display text-foreground">{ord.symbol}</td>
+                                            <td className="px-4 py-3">{(ord.order_type || ord.type || '—').toUpperCase()}</td>
+                                            <td className="px-4 py-3">{(ord.side || '—').toUpperCase()}</td>
+                                            <td className="px-4 py-3">{ord.qty ?? '—'}</td>
+                                            <td className="px-4 py-3">{ord.filled_qty ?? '—'}</td>
+                                            <td className="px-4 py-3">{ord.filled_avg_price ? `$${formatMoney(ord.filled_avg_price, 2)}` : '—'}</td>
+                                            <td className="px-4 py-3">
+                                                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30">
+                                                    {ord.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">{ord.source || 'api'}</td>
+                                            <td className="px-4 py-3">{ord.submitted_at ? new Date(ord.submitted_at).toLocaleString() : '—'}</td>
+                                            <td className="px-4 py-3">{ord.filled_at ? new Date(ord.filled_at).toLocaleString() : '—'}</td>
+                                            <td className="px-4 py-3">{ord.expires_at ? new Date(ord.expires_at).toLocaleString() : '—'}</td>
+                                        </motion.tr>
+                                    ))}
+                                    {displayOrders.length === 0 && (
+                                        <tr>
+                                            <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                                                No orders. Place a trade via the dashboard or the API to see this table populate.
                                             </td>
                                         </tr>
                                     )}

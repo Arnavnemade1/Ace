@@ -52,7 +52,13 @@ serve(async (req) => {
     });
     const positions = posRes.ok ? await posRes.json() : [];
 
-    return new Response(JSON.stringify({ snapshots, account, positions, clock }), {
+    // Fetch orders (most recent first)
+    const ordersRes = await fetch("https://paper-api.alpaca.markets/v2/orders?status=all&limit=50&direction=desc", {
+      headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+    });
+    const orders = ordersRes.ok ? await ordersRes.json() : [];
+
+    return new Response(JSON.stringify({ snapshots, account, positions, orders, clock }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
