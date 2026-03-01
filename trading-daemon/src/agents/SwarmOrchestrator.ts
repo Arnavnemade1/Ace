@@ -68,13 +68,9 @@ export class SwarmOrchestrator {
 
             console.log(`Neural Pulse: Next thought in ${cycleDelay / 1000}s (Urgency: ${urgency.toFixed(2)})`);
 
-            // Heartbeat Logic: Emit status during delay to keep UI alive
-            const heartbeatCount = Math.floor(cycleDelay / 15000);
-            for (let h = 0; h < heartbeatCount; h++) {
-                if (!this.isRunning) break;
-                await new Promise(res => setTimeout(res, 15000));
-                await logAgentAction('Orchestrator', 'info', `Heartbeat Pulse [${h + 1}/${heartbeatCount}]`, `Pulse Stability: 100% | Latency: 12ms`);
-            }
+            // Quiet wait between cycles (no heartbeat spam)
+            if (!this.isRunning) break;
+            await new Promise(res => setTimeout(res, cycleDelay));
         }
     }
 
@@ -173,6 +169,19 @@ export class SwarmOrchestrator {
         // 4. Strategy evaluation with full Market Pulse and Position Awareness
         await logAgentAction('Strategy Engine', 'info', 'Neural Strategy Synthesis in Progress...');
         const signals = await this.strategy.evaluate(this.watchlist, pulse, activeSymbols, account, positions);
+        const shortlist = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 8);
+        if (shortlist.length > 0) {
+            await logAgentAction(
+                'Strategy Engine',
+                'learning',
+                'Shortlist candidates',
+                shortlist
+                    .map(s => `${s.symbol} ${s.signal_type} (${s.strength.toFixed(2)}) — ${s.reasoning || s.metadata?.news_context || 'signal strength/technical setup'}`)
+                    .join(' | ')
+            );
+        } else {
+            await logAgentAction('Strategy Engine', 'learning', 'Shortlist candidates', 'No candidates met the quality threshold this cycle.');
+        }
 
         // 5. Execute top signals with Dynamic Risk Guardrails (Phase 31)
         let executionResult: any = null;
