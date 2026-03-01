@@ -7,9 +7,9 @@ export class RiskController {
     private strengthThreshold = 0.7; // minimum signal strength to act
     private buyStrengthThreshold = 0.8; // stricter BUY threshold
     private maxTradesPerCycle = 1;
-    private minMinutesBetweenTrades = 10;
+    private minMinutesBetweenTrades = 30;
     private minBuyingPower = 1000;
-    private cashBufferPct = 0.2; // keep 20% cash
+    private cashBufferPct = 0.25; // keep 25% cash
     private maxAllocationPct = 0.02; // max 2% equity per trade
 
     // [x] Phase 32: Symbol Fatigue & Manual Blacklist

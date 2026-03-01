@@ -40,13 +40,19 @@ serve(async (req) => {
     });
     const account = accRes.ok ? await accRes.json() : null;
 
+    // Fetch market clock (handles holidays)
+    const clockRes = await fetch("https://paper-api.alpaca.markets/v2/clock", {
+      headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+    });
+    const clock = clockRes.ok ? await clockRes.json() : null;
+
     // Fetch positions
     const posRes = await fetch("https://paper-api.alpaca.markets/v2/positions", {
       headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
     });
     const positions = posRes.ok ? await posRes.json() : [];
 
-    return new Response(JSON.stringify({ snapshots, account, positions }), {
+    return new Response(JSON.stringify({ snapshots, account, positions, clock }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

@@ -9,10 +9,12 @@ const corsHeaders = {
 const ALPACA_PAPER_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA_URL = "https://data.alpaca.markets";
 const NY_TZ = "America/New_York";
-const MIN_MINUTES_BETWEEN_TRADES = 10;
+const MIN_MINUTES_BETWEEN_TRADES = 30;
 const MIN_BUYING_POWER = 1000;
-const CASH_BUFFER_PCT = 0.2;
+const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
+const MAX_TRADES_PER_DAY = 5;
+const MAX_OPEN_POSITIONS = 8;
 
 function isMarketOpen(): boolean {
   const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
@@ -20,6 +22,18 @@ function isMarketOpen(): boolean {
   if (day === 0 || day === 6) return false;
   const minutes = nowNY.getHours() * 60 + nowNY.getMinutes();
   return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+}
+
+async function getMarketClock(key: string, secret: string) {
+  try {
+    const res = await fetch(`${ALPACA_PAPER_URL}/v2/clock`, {
+      headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 async function fetchSnapshot(symbol: string, key: string, secret: string) {
@@ -79,6 +93,23 @@ serve(async (req) => {
       }
     }
 
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: executedToday } = await supabase
+      .from("trades")
+      .select("id")
+      .eq("status", "executed")
+      .gte("created_at", dayAgo);
+    if ((executedToday?.length || 0) >= MAX_TRADES_PER_DAY) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Execution Agent",
+        log_type: "info",
+        message: `Daily trade cap reached (${MAX_TRADES_PER_DAY}). Skipping execution.`,
+      });
+      return new Response(JSON.stringify({ success: true, message: "Daily trade cap" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Fetch approved pending trades
     const { data: pendingTrades } = await supabase
       .from("trades")
@@ -93,18 +124,42 @@ serve(async (req) => {
     }
 
     const results: any[] = [];
-    const marketOpen = isMarketOpen();
+    const clock = await getMarketClock(ALPACA_API_KEY, ALPACA_API_SECRET);
+    const marketOpen = clock?.is_open ?? isMarketOpen();
 
-    // Fetch account for budget guardrails
-    const accountRes = await fetch(`${ALPACA_PAPER_URL}/v2/account`, {
-      headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+    await supabase.from("agent_logs").insert({
+      agent_name: "Execution Agent",
+      log_type: "info",
+      message: `Market ${marketOpen ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"} | Next close: ${clock?.next_close || "unknown"}`,
     });
+    await supabase.from("agent_logs").insert({
+      agent_name: "Execution Agent",
+      log_type: "info",
+      message: "Order routing: market orders during open; GTC limit orders when closed. BUY opens long positions; SELL exits existing positions.",
+    });
+
+    // Fetch account/positions/orders for guardrails
+    const [accountRes, positionsRes, openOrdersRes] = await Promise.all([
+      fetch(`${ALPACA_PAPER_URL}/v2/account`, {
+        headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+      }),
+      fetch(`${ALPACA_PAPER_URL}/v2/positions`, {
+        headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+      }),
+      fetch(`${ALPACA_PAPER_URL}/v2/orders?status=open`, {
+        headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+      }),
+    ]);
     const account = accountRes.ok ? await accountRes.json() : null;
+    const positions = positionsRes.ok ? await positionsRes.json() : [];
+    const openOrders = openOrdersRes.ok ? await openOrdersRes.json() : [];
     const equity = account ? parseFloat(account.equity) : 0;
     const cash = account ? parseFloat(account.cash) : 0;
     const buyingPower = account ? parseFloat(account.buying_power) : 0;
     const minCashBuffer = equity * CASH_BUFFER_PCT;
     const maxAllocation = equity * MAX_ALLOCATION_PCT;
+    const positionSymbols = new Set(Array.isArray(positions) ? positions.map((p: any) => p.symbol) : []);
+    const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
 
     if (buyingPower < MIN_BUYING_POWER) {
       await supabase.from("agent_logs").insert({
@@ -117,13 +172,6 @@ serve(async (req) => {
       });
     }
 
-    // Fetch open orders once to avoid wash-trade conflicts
-    const openOrdersRes = await fetch(`${ALPACA_PAPER_URL}/v2/orders?status=open`, {
-      headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
-    });
-    const openOrders = openOrdersRes.ok ? await openOrdersRes.json() : [];
-    const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
-
     let processed = 0;
     for (const trade of pendingTrades) {
       if (processed >= 1) break;
@@ -134,6 +182,33 @@ serve(async (req) => {
             reasoning: "Skipped: open order exists for this symbol (wash-trade risk).",
           }).eq("id", trade.id);
           results.push({ trade_id: trade.id, status: "failed", error: "open order exists" });
+          continue;
+        }
+
+        if (trade.side === "BUY" && (cash < minCashBuffer || buyingPower < MIN_BUYING_POWER)) {
+          await supabase.from("trades").update({
+            status: "failed",
+            reasoning: "Skipped: insufficient buying power or cash buffer.",
+          }).eq("id", trade.id);
+          results.push({ trade_id: trade.id, status: "failed", error: "insufficient funds" });
+          continue;
+        }
+
+        if (trade.side === "BUY" && positionSymbols.size >= MAX_OPEN_POSITIONS && !positionSymbols.has(trade.symbol)) {
+          await supabase.from("trades").update({
+            status: "failed",
+            reasoning: "Skipped: max open positions reached.",
+          }).eq("id", trade.id);
+          results.push({ trade_id: trade.id, status: "failed", error: "max positions" });
+          continue;
+        }
+
+        if (trade.side === "SELL" && !positionSymbols.has(trade.symbol)) {
+          await supabase.from("trades").update({
+            status: "failed",
+            reasoning: "Skipped: no position to sell.",
+          }).eq("id", trade.id);
+          results.push({ trade_id: trade.id, status: "failed", error: "no position" });
           continue;
         }
 
@@ -293,7 +368,7 @@ serve(async (req) => {
     }
 
     // Sync portfolio state from Alpaca
-    const [accountRes, positionsRes] = await Promise.all([
+    const [accountResSync, positionsResSync] = await Promise.all([
       fetch(`${ALPACA_PAPER_URL}/v2/account`, {
         headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
       }),
@@ -302,9 +377,9 @@ serve(async (req) => {
       }),
     ]);
 
-    if (accountRes.ok) {
-      const account = await accountRes.json();
-      const positionsData = positionsRes.ok ? await positionsRes.json() : [];
+    if (accountResSync.ok) {
+      const account = await accountResSync.json();
+      const positionsData = positionsResSync.ok ? await positionsResSync.json() : [];
 
       const formattedPositions = Array.isArray(positionsData) ? positionsData.map((p: any) => ({
         symbol: p.symbol,
@@ -363,6 +438,7 @@ serve(async (req) => {
       last_action: `Executed ${executed}/${pendingTrades.length} trades`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Execution Agent");
 
     return new Response(JSON.stringify({ success: true, results }), {

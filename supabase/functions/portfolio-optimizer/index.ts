@@ -5,6 +5,8 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+const MIN_POSITIONS_FOR_OPTIMIZATION = 2;
+const CASH_BUFFER_PCT = 0.25;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -35,6 +37,48 @@ serve(async (req) => {
       ]);
       if (posRes.ok) positions = await posRes.json();
       if (accRes.ok) account = await accRes.json();
+    }
+
+    const equity = Number(account?.equity || 0);
+    const cash = Number(account?.cash || 0);
+    const minCashBuffer = equity * CASH_BUFFER_PCT;
+
+    if ((positions?.length || 0) < MIN_POSITIONS_FOR_OPTIMIZATION) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Portfolio Optimizer",
+        log_type: "info",
+        message: "Optimization skipped: not enough open positions.",
+      });
+      await supabase.from("agent_state").update({
+        metric_value: "0",
+        metric_label: "Sharpe ratio",
+        last_action: "Skipped optimization (insufficient positions)",
+        last_action_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        status: "idle",
+      }).eq("agent_name", "Portfolio Optimizer");
+      return new Response(JSON.stringify({ success: true, optimization: null, reason: "insufficient positions" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (equity > 0 && cash < minCashBuffer) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Portfolio Optimizer",
+        log_type: "info",
+        message: "Optimization skipped: cash buffer below threshold.",
+      });
+      await supabase.from("agent_state").update({
+        metric_value: "0",
+        metric_label: "Sharpe ratio",
+        last_action: "Skipped optimization (cash buffer)",
+        last_action_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        status: "idle",
+      }).eq("agent_name", "Portfolio Optimizer");
+      return new Response(JSON.stringify({ success: true, optimization: null, reason: "cash buffer" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Fetch trade history for performance calculation
@@ -182,6 +226,7 @@ Also calculate portfolio metrics: Sharpe ratio, Sortino ratio, max drawdown.`,
       last_action: `Optimized portfolio, ${optResult.rebalance_trades.length} rebalance trades`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Portfolio Optimizer");
 
     return new Response(JSON.stringify({ success: true, optimization: optResult }), {

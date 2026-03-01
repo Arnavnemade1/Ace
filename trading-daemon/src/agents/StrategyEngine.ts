@@ -78,7 +78,7 @@ export class StrategyEngine {
 
                     const decision = await this.brain.synthesize(context);
 
-                    if (decision.action !== 'HOLD' && decision.conviction > 0.8) {
+                    if (decision.action !== 'HOLD' && decision.conviction > 0.85) {
                         const signal = {
                             symbol,
                             signal_type: decision.action,

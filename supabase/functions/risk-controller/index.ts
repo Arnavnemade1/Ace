@@ -6,8 +6,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MAX_POSITION_PCT = 0.15; // 15% max per position (aggressive for paper)
-const MAX_DAILY_LOSS = 0.05; // 5% max daily loss
+const MAX_POSITION_PCT = 0.05; // 5% max per position (mindful)
+const MAX_DAILY_LOSS = 0.02; // 2% max daily loss
+const MIN_BUYING_POWER = 1000;
+const CASH_BUFFER_PCT = 0.25;
+const MAX_OPEN_POSITIONS = 8;
+const MAX_TRADES_PER_DAY = 5;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -40,10 +44,30 @@ serve(async (req) => {
 
     const portfolioValue = portfolio?.total_value || 100000;
     const cash = portfolio?.cash || 100000;
+    const buyingPower = portfolio?.buying_power || cash;
     const dailyPnl = portfolio?.daily_pnl || 0;
     const positions = portfolio?.positions || [];
+    const minCashBuffer = portfolioValue * CASH_BUFFER_PCT;
+    const positionSymbols = new Set((positions || []).map((p: any) => p.symbol));
 
-    // AI-enhanced risk assessment — permissive for paper trading
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: executedToday } = await supabase
+      .from("trades")
+      .select("id")
+      .eq("status", "executed")
+      .gte("created_at", dayAgo);
+    if ((executedToday?.length || 0) >= MAX_TRADES_PER_DAY) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Risk Controller",
+        log_type: "info",
+        message: `Daily trade cap reached (${MAX_TRADES_PER_DAY}). Skipping risk approvals.`,
+      });
+      return new Response(JSON.stringify({ success: true, approved: 0, rejected: pendingTrades.length, reason: "daily cap" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // AI-enhanced risk assessment — mindful for paper trading
     const tradesSummary = pendingTrades.map((t) =>
       `ID:${t.id} — ${t.side} ${t.qty} ${t.symbol} (strategy: ${t.strategy}, reasoning: ${t.reasoning})`
     ).join("\n");
@@ -61,17 +85,17 @@ serve(async (req) => {
             role: "system",
             content: `You are the Risk Controller of an autonomous PAPER trading system. Review pending trades and apply risk rules:
 
-Rules (RELAXED for paper trading — be permissive):
+Rules (MINDFUL):
 - Max ${MAX_POSITION_PCT * 100}% of portfolio ($${portfolioValue}) in any single position
 - Max ${MAX_DAILY_LOSS * 100}% daily loss (current daily P&L: $${dailyPnl})
-- Approve most trades — this is paper trading for learning
-- Only reject if it would create extreme concentration (>25% in one stock)
-- Adjust qty if needed but prefer to approve
+- Maintain cash buffer of ${CASH_BUFFER_PCT * 100}% (min $${minCashBuffer.toFixed(2)})
+- Reject trades that would create over-concentration or exceed cash/buying power
+- Adjust qty down when needed; prefer fewer, higher-quality trades
 
 Current positions: ${JSON.stringify(positions)}
 Cash available: $${cash}
 
-IMPORTANT: Approve aggressively. Only reject truly dangerous trades.`,
+IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.`,
           },
           {
             role: "user",
@@ -130,6 +154,24 @@ IMPORTANT: Approve aggressively. Only reject truly dangerous trades.`,
       const trade = pendingTrades.find((t) => t.id === decision.trade_id);
       if (!trade) continue;
 
+      if (trade.side === "BUY") {
+        if (buyingPower < MIN_BUYING_POWER || cash < minCashBuffer) {
+          await supabase.from("trades").update({ status: "cancelled", reasoning: "Risk rejected: insufficient buying power or cash buffer." }).eq("id", trade.id);
+          rejected++;
+          continue;
+        }
+        if (positions.length >= MAX_OPEN_POSITIONS && !positionSymbols.has(trade.symbol)) {
+          await supabase.from("trades").update({ status: "cancelled", reasoning: "Risk rejected: max open positions reached." }).eq("id", trade.id);
+          rejected++;
+          continue;
+        }
+      }
+      if (trade.side === "SELL" && !positionSymbols.has(trade.symbol)) {
+        await supabase.from("trades").update({ status: "cancelled", reasoning: "Risk rejected: no existing position to sell." }).eq("id", trade.id);
+        rejected++;
+        continue;
+      }
+
       if (decision.approved) {
         const newQty = decision.adjusted_qty || trade.qty;
         await supabase.from("trades").update({
@@ -164,6 +206,7 @@ IMPORTANT: Approve aggressively. Only reject truly dangerous trades.`,
       last_action: `${approved} approved, ${rejected} rejected`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Risk Controller");
 
     return new Response(JSON.stringify({ success: true, approved, rejected, portfolio_var: riskResult.portfolio_var }), {

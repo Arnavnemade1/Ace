@@ -6,7 +6,44 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META", "AMD", "GOOGL"];
+const FALLBACK_WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META", "AMD", "GOOGL"];
+const MAX_SYMBOLS_PER_REQUEST = 100;
+const DEFAULT_SCAN_SIZE = 200;
+const ALLOWED_EXCHANGES = new Set(["NYSE", "NASDAQ", "AMEX", "ARCA", "BATS"]);
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+function sanitizeSymbol(sym: string): string | null {
+  const clean = sym?.trim().toUpperCase();
+  if (!clean) return null;
+  // Avoid symbols with dots/dashes that often fail on snapshot endpoints
+  if (!/^[A-Z]{1,5}$/.test(clean)) return null;
+  return clean;
+}
+
+async function fetchUniverse(alpacaKey: string, alpacaSecret: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity", {
+      headers: {
+        "APCA-API-KEY-ID": alpacaKey,
+        "APCA-API-SECRET-KEY": alpacaSecret,
+      },
+    });
+    if (!res.ok) return [];
+    const assets = await res.json();
+    const symbols = (assets || [])
+      .filter((a: any) => a?.tradable && a?.status === "active" && ALLOWED_EXCHANGES.has(a?.exchange))
+      .map((a: any) => sanitizeSymbol(a?.symbol))
+      .filter(Boolean) as string[];
+    return Array.from(new Set(symbols)).sort();
+  } catch {
+    return [];
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -26,45 +63,95 @@ serve(async (req) => {
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Market Scanner");
 
-    // Fetch snapshots for all watchlist symbols
-    const snapshotsRes = await fetch(
-      `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${WATCHLIST.join(",")}`,
-      {
-        headers: {
-          "APCA-API-KEY-ID": ALPACA_API_KEY,
-          "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
-        },
-      }
-    );
+    const scanSize = Number(Deno.env.get("MARKET_SCAN_SIZE") || DEFAULT_SCAN_SIZE);
+    const universe = await fetchUniverse(ALPACA_API_KEY, ALPACA_API_SECRET);
+    const effectiveUniverse = universe.length > 0 ? universe : FALLBACK_WATCHLIST;
+
+    const { data: stateRow } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Market Scanner")
+      .maybeSingle();
+    const config = (stateRow?.config || {}) as Record<string, any>;
+    const cursor = Number(config.scan_cursor || 0);
+    const sliceSize = Math.min(scanSize, effectiveUniverse.length);
+    const scanSymbols: string[] = [];
+    for (let i = 0; i < sliceSize; i++) {
+      scanSymbols.push(effectiveUniverse[(cursor + i) % effectiveUniverse.length]);
+    }
+    const nextCursor = (cursor + scanSymbols.length) % effectiveUniverse.length;
+
+    await supabase.from("agent_state").update({
+      config: {
+        ...config,
+        scan_cursor: nextCursor,
+        last_symbols: scanSymbols,
+        universe_size: effectiveUniverse.length,
+        last_scan_at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    }).eq("agent_name", "Market Scanner");
 
     let snapshots: Record<string, any> = {};
-    if (snapshotsRes.ok) {
-      snapshots = await snapshotsRes.json();
-    }
-
-    // Also store raw data to live_api_streams for Analytics page
-    for (const [symbol, snap] of Object.entries(snapshots)) {
-      if (snap?.latestTrade?.p) {
-        await supabase.from("live_api_streams").insert({
-          source: "AlphaVantage",
-          symbol_or_context: symbol,
-          payload: { "05. price": String(snap.latestTrade.p), symbol, ...snap.dailyBar },
-        });
+    for (const group of chunk(scanSymbols, MAX_SYMBOLS_PER_REQUEST)) {
+      const snapRes = await fetch(
+        `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${group.join(",")}`,
+        {
+          headers: {
+            "APCA-API-KEY-ID": ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+          },
+        }
+      );
+      if (snapRes.ok) {
+        const data = await snapRes.json();
+        snapshots = { ...snapshots, ...(data || {}) };
       }
     }
 
-    // Build rich market context with real data
-    const marketContext = WATCHLIST.map((symbol) => {
+    const streamRows = scanSymbols.map((symbol) => {
       const snap = snapshots[symbol];
-      if (!snap) return `${symbol}: No data available`;
-      const price = snap.latestTrade?.p || snap.dailyBar?.c || 0;
-      const prevClose = snap.prevDailyBar?.c || snap.dailyBar?.o || price;
-      const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100).toFixed(2) : "N/A";
-      const vol = snap.dailyBar?.v || 0;
-      const high = snap.dailyBar?.h || 0;
-      const low = snap.dailyBar?.l || 0;
-      const vwap = snap.dailyBar?.vw || 0;
-      return `${symbol}: Price=$${price}, Change=${change}%, Vol=${vol}, High=$${high}, Low=$${low}, VWAP=$${vwap}`;
+      const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
+      if (!price) return null;
+      return {
+        source: "AlpacaSnapshot",
+        symbol_or_context: symbol,
+        payload: {
+          symbol,
+          price,
+          change_pct: snap?.prevDailyBar?.c ? ((price - snap.prevDailyBar.c) / snap.prevDailyBar.c) * 100 : null,
+          volume: snap?.dailyBar?.v || 0,
+          high: snap?.dailyBar?.h || 0,
+          low: snap?.dailyBar?.l || 0,
+          vwap: snap?.dailyBar?.vw || 0,
+          ts: new Date().toISOString(),
+        },
+      };
+    }).filter(Boolean) as any[];
+
+    if (streamRows.length > 0) {
+      await supabase.from("live_api_streams").insert(streamRows);
+    }
+
+    const ranked = scanSymbols
+      .map((symbol) => {
+        const snap = snapshots[symbol];
+        const price = snap?.latestTrade?.p || snap?.dailyBar?.c || 0;
+        const prevClose = snap?.prevDailyBar?.c || snap?.dailyBar?.o || price;
+        const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+        const vol = snap?.dailyBar?.v || 0;
+        return { symbol, price, change, vol, snap };
+      })
+      .filter((row) => row.price > 0)
+      .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+      .slice(0, 40);
+
+    const marketContext = ranked.map((row) => {
+      const snap = row.snap;
+      const high = snap?.dailyBar?.h || 0;
+      const low = snap?.dailyBar?.l || 0;
+      const vwap = snap?.dailyBar?.vw || 0;
+      return `${row.symbol}: Price=$${row.price.toFixed(2)}, Change=${row.change.toFixed(2)}%, Vol=${row.vol}, High=$${high}, Low=$${low}, VWAP=$${vwap}`;
     }).join("\n");
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -78,7 +165,7 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are the Market Scanner agent of an aggressive autonomous paper trading system. Analyze REAL market data and identify strong trading signals. 
+            content: `You are the Market Scanner agent of a cautious autonomous paper trading system. Analyze REAL market data and identify ONLY high-quality signals.
 
 For each signal, provide:
 - symbol
@@ -86,13 +173,15 @@ For each signal, provide:
 - strength: 0.0 to 1.0
 - reasoning: brief explanation
 
-IMPORTANT: Be generous with signals — lower the threshold. Return signals with strength >= 0.4.
-Look for: momentum plays, oversold bounces, breakouts, high volume moves, sector divergences.
-This is paper trading — we want to learn from many trades.`,
+IMPORTANT:
+- Return only signals with strength >= 0.6.
+- Prefer liquidity, strong trend confirmation, and clean setups.
+- If data quality is weak, return fewer signals rather than forcing trades.
+- Max 10 signals total.`,
           },
           {
             role: "user",
-            content: `Current REAL market data:\n${marketContext}\n\nFind ALL tradeable signals. Be aggressive.`,
+            content: `Current REAL market data (top movers from a full-market sweep of ${scanSymbols.length} symbols):\n${marketContext}\n\nFind high-quality signals only.`,
           },
         ],
         tools: [
@@ -142,8 +231,12 @@ This is paper trading — we want to learn from many trades.`,
     }
 
     // Store signals in database
-    if (signals.length > 0) {
-      const signalRows = signals.map((s: any) => ({
+    const filteredSignals = (signals || [])
+      .filter((s: any) => Number(s.strength || 0) >= 0.6)
+      .slice(0, 10);
+
+    if (filteredSignals.length > 0) {
+      const signalRows = filteredSignals.map((s: any) => ({
         symbol: s.symbol,
         signal_type: s.signal_type,
         strength: s.strength,
@@ -158,19 +251,20 @@ This is paper trading — we want to learn from many trades.`,
     await supabase.from("agent_logs").insert({
       agent_name: "Market Scanner",
       log_type: "info",
-      message: `Scanned ${WATCHLIST.length} symbols with REAL data, found ${signals.length} signals`,
-      metadata: { symbols_scanned: WATCHLIST, signal_count: signals.length },
+      message: `Scanned ${scanSymbols.length} symbols (sweep of ${effectiveUniverse.length}), found ${filteredSignals.length} signals`,
+      metadata: { symbols_scanned: scanSymbols, signal_count: filteredSignals.length, universe_size: effectiveUniverse.length },
     });
 
     await supabase.from("agent_state").update({
-      metric_value: String(signals.length),
+      metric_value: String(filteredSignals.length),
       metric_label: "signals / hr",
-      last_action: `Scanned ${WATCHLIST.length} symbols (live)`,
+      last_action: `Scanned ${scanSymbols.length} symbols (market sweep)`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Market Scanner");
 
-    return new Response(JSON.stringify({ success: true, signals_found: signals.length, signals }), {
+    return new Response(JSON.stringify({ success: true, signals_found: filteredSignals.length, signals: filteredSignals }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

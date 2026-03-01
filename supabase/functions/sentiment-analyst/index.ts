@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META"];
+const FALLBACK_WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META"];
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -23,11 +23,19 @@ serve(async (req) => {
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Sentiment Analyst");
 
+    const { data: scanState } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Market Scanner")
+      .maybeSingle();
+    const lastSymbols = (scanState?.config?.last_symbols || []) as string[];
+    const symbols = lastSymbols.length > 0 ? lastSymbols.slice(0, 50) : FALLBACK_WATCHLIST;
+
     // Fetch news from Alpaca
     let newsItems: any[] = [];
     if (ALPACA_API_KEY && ALPACA_API_SECRET) {
       const newsRes = await fetch(
-        `https://data.alpaca.markets/v1beta1/news?symbols=${WATCHLIST.join(",")}&limit=20`,
+        `https://data.alpaca.markets/v1beta1/news?symbols=${symbols.join(",")}&limit=25`,
         {
           headers: {
             "APCA-API-KEY-ID": ALPACA_API_KEY,
@@ -43,7 +51,7 @@ serve(async (req) => {
 
     const newsContext = newsItems.length > 0
       ? newsItems.map((n: any) => `[${n.symbols?.join(",")}] ${n.headline} - ${n.summary?.slice(0, 200) || ""}`).join("\n")
-      : "No recent news available. Provide general market sentiment based on current market conditions for: " + WATCHLIST.join(", ");
+      : "No recent news available. Provide general market sentiment based on current market conditions for: " + symbols.join(", ");
 
     // AI sentiment analysis
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -56,12 +64,12 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are the Sentiment Analyst agent. Analyze news headlines and market context to produce sentiment scores for each symbol. 
+            content: `You are the Sentiment Analyst agent. Analyze news headlines and market context to produce sentiment scores for each symbol.
 
 Score from -1.0 (extremely bearish) to 1.0 (extremely bullish). 0.0 is neutral.
 Also provide an overall market sentiment score.
 
-Be nuanced — consider sector rotation, macro factors, and cross-asset implications.`,
+Be nuanced and conservative — avoid overreacting to single headlines.`,
           },
           {
             role: "user",
@@ -141,6 +149,7 @@ Be nuanced — consider sector rotation, macro factors, and cross-asset implicat
       last_action: `Analyzed ${newsItems.length} news items`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Sentiment Analyst");
 
     return new Response(JSON.stringify({ success: true, sentiment: sentimentResult }), {

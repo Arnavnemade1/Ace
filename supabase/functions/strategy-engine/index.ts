@@ -5,7 +5,25 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-const MIN_MINUTES_BETWEEN_TRADES = 10;
+const MIN_MINUTES_BETWEEN_TRADES = 30;
+const MAX_TRADES_PER_DAY = 5;
+const MIN_BUYING_POWER = 1000;
+const CASH_BUFFER_PCT = 0.25;
+const MAX_ALLOCATION_PCT = 0.02;
+const MAX_OPEN_POSITIONS = 8;
+
+async function getMarketClock(key?: string, secret?: string) {
+  if (!key || !secret) return null;
+  try {
+    const res = await fetch("https://paper-api.alpaca.markets/v2/clock", {
+      headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -42,6 +60,23 @@ serve(async (req) => {
       }
     }
 
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentExecutions } = await supabase
+      .from("trades")
+      .select("id")
+      .eq("status", "executed")
+      .gte("created_at", dayAgo);
+    if ((recentExecutions?.length || 0) >= MAX_TRADES_PER_DAY) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Strategy Engine",
+        log_type: "info",
+        message: `Daily trade cap reached (${MAX_TRADES_PER_DAY}). Skipping new recommendations.`,
+      });
+      return new Response(JSON.stringify({ success: true, decisions: [] }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Fetch unacted signals
     const { data: signals } = await supabase
       .from("signals")
@@ -74,6 +109,22 @@ serve(async (req) => {
       }
     }
 
+    const clock = await getMarketClock(ALPACA_API_KEY || undefined, ALPACA_API_SECRET || undefined);
+    let account: any = null;
+    let positions: any[] = [];
+    if (ALPACA_API_KEY && ALPACA_API_SECRET) {
+      const [accRes, posRes] = await Promise.all([
+        fetch("https://paper-api.alpaca.markets/v2/account", {
+          headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+        }),
+        fetch("https://paper-api.alpaca.markets/v2/positions", {
+          headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+        }),
+      ]);
+      if (accRes.ok) account = await accRes.json();
+      if (posRes.ok) positions = await posRes.json();
+    }
+
     if (!signals || signals.length === 0) {
       await supabase.from("agent_logs").insert({
         agent_name: "Strategy Engine",
@@ -91,12 +142,14 @@ serve(async (req) => {
       return `${s.symbol}: ${s.signal_type} (strength: ${s.strength}, price: $${price}) - ${s.metadata?.reasoning || "No reasoning"}`;
     }).join("\n");
 
-    const portfolioValue = portfolio?.total_value || 100000;
-    const cash = portfolio?.cash || 100000;
-    const currentPositions = portfolio?.positions || [];
-    const maxAllocation = portfolioValue * 0.02;
+    const portfolioValue = Number(account?.equity || portfolio?.total_value || 100000);
+    const cash = Number(account?.cash || portfolio?.cash || 100000);
+    const buyingPower = Number(account?.buying_power || portfolio?.buying_power || cash);
+    const currentPositions = positions.length > 0 ? positions : (portfolio?.positions || []);
+    const maxAllocation = portfolioValue * MAX_ALLOCATION_PCT;
+    const minCashBuffer = portfolioValue * CASH_BUFFER_PCT;
 
-    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Positions: ${JSON.stringify(currentPositions)}`;
+    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}`;
 
     const tradeHistory = recentTrades?.map((t) =>
       `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
@@ -114,22 +167,23 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are the Strategy Engine of an autonomous paper trading system. You run three strategies:
-1. Momentum: Follow strong trends (signal strength > 0.6)
-2. Mean Reversion: Fade overextended moves
-3. Volatility Arbitrage: Trade vol spikes
+            content: `You are the Strategy Engine of a cautious autonomous paper trading system. You run three strategies:
+1. Momentum: Follow strong trends (signal strength > 0.7)
+2. Mean Reversion: Fade overextended moves with confirmation
+3. Volatility Arbitrage: Trade vol spikes only if liquidity is strong
 
 IMPORTANT RULES:
 - Be selective and avoid overtrading. If signals are weak, return no trades.
 - Max 1 trade per cycle.
-- Prefer signals with strength >= 0.7.
-- Size positions appropriately: use real prices to calculate qty (max 5% of portfolio per trade)
-- Consider existing positions to avoid over-concentration
-- Calculate qty based on real prices: qty = floor(allocation / price)`,
+- Prefer signals with strength >= 0.8.
+- Do NOT recommend new BUYs if cash buffer is below ${CASH_BUFFER_PCT * 100}% of equity.
+- Do NOT recommend trades if buying power is below $${MIN_BUYING_POWER}.
+- Consider existing positions to avoid over-concentration.
+- Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.`,
           },
           {
             role: "user",
-            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. Be aggressive — this is paper trading. Size appropriately using real prices.`,
+            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nMarket Clock: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next Open: ${clock?.next_open || "unknown"} | Next Close: ${clock?.next_close || "unknown"}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. If market is closed, still recommend if you would queue a GTC limit order at open.`,
           },
         ],
         tools: [
@@ -178,6 +232,7 @@ IMPORTANT RULES:
 
     // Budget-aware filtering: only BUY if strength is high and allocation fits live price
     const signalStrengthBySymbol = new Map((signals || []).map((s) => [s.symbol, Number(s.strength || 0)]));
+    const heldSymbols = new Set((currentPositions || []).map((p: any) => p.symbol));
     decisions = decisions.filter((d) => {
       if (d.side !== "BUY") return true;
       const strength = signalStrengthBySymbol.get(d.symbol) || 0;
@@ -185,9 +240,17 @@ IMPORTANT RULES:
       const snap = snapshots[d.symbol];
       const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
       if (!price) return false;
+      if (buyingPower < MIN_BUYING_POWER) return false;
+      if (cash < minCashBuffer) return false;
+      if (heldSymbols.has(d.symbol)) return false;
+      if (currentPositions.length >= MAX_OPEN_POSITIONS) return false;
       const maxQty = Math.max(1, Math.floor(maxAllocation / price));
       d.qty = Math.min(d.qty, maxQty);
       return d.qty >= 1;
+    });
+    decisions = decisions.filter((d) => {
+      if (d.side === "SELL") return heldSymbols.has(d.symbol);
+      return true;
     });
 
     // Mark signals as acted on
@@ -213,7 +276,7 @@ IMPORTANT RULES:
       agent_name: "Strategy Engine",
       log_type: "decision",
       message: `Processed ${signals.length} signals → ${decisions.length} trades recommended`,
-      reasoning: decisions.map((d) => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; "),
+      reasoning: decisions.map((d) => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; ") || "No trades recommended.",
       metadata: { signal_count: signals.length, trade_count: decisions.length },
     });
 
@@ -223,6 +286,7 @@ IMPORTANT RULES:
       last_action: `Recommended ${decisions.length} trades`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Strategy Engine");
 
     return new Response(JSON.stringify({ success: true, decisions }), {

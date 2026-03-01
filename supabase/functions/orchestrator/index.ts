@@ -93,6 +93,7 @@ serve(async (req) => {
       last_action: `${mode}: ${successCount}/${results.length} succeeded`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      status: "idle",
     }).eq("agent_name", "Orchestrator");
 
     return new Response(JSON.stringify({ success: true, mode, results }), {

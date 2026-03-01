@@ -8,9 +8,9 @@ const corsHeaders = {
 
 const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
-const MIN_MINUTES_BETWEEN_TRADES = 10;
+const MIN_MINUTES_BETWEEN_TRADES = 30;
 const MIN_BUYING_POWER = 1000;
-const CASH_BUFFER_PCT = 0.2;
+const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
 
 function isMarketOpen(): boolean {
@@ -19,6 +19,18 @@ function isMarketOpen(): boolean {
     if (day === 0 || day === 6) return false;
     const minutes = nowNY.getHours() * 60 + nowNY.getMinutes();
     return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+}
+
+async function getMarketClock(key: string, secret: string) {
+    try {
+        const res = await fetch("https://paper-api.alpaca.markets/v2/clock", {
+            headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+        });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
 }
 
 serve(async (req) => {
@@ -82,6 +94,8 @@ serve(async (req) => {
         const account = await accRes.json();
         const positions = await posRes.json();
         const openOrders = await ordersRes.json();
+        const clock = await getMarketClock(ALPACA_KEY, ALPACA_SECRET);
+        const marketOpen = clock?.is_open ?? isMarketOpen();
         const currentHoldings = Array.isArray(positions) ? positions.map((p: any) => p.symbol) : [];
         const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
         const equity = parseFloat(account.equity || "0");
@@ -150,16 +164,17 @@ serve(async (req) => {
                 {
                     role: "system",
                     content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system. 
-You make REAL trades on Alpaca Paper. Your goal: MAXIMIZE RETURNS through smart, data-driven decisions.
+You make REAL trades on Alpaca Paper. Your goal: preserve capital and take only high-quality opportunities.
 
 RULES:
-- Be selective. If conviction < 0.8, return HOLD.
+- Be selective. If conviction < 0.85, return HOLD.
 - Only ONE trade maximum per cycle.
 - Do NOT trade symbols with open orders.
 - If market is closed, only place LIMIT orders (no market orders).
 - Analyze the REAL market data, prices, volumes, and day changes provided.
 - Consider news sentiment when making decisions.
-- Max 15% of equity per position for risk management.
+- Max 2% of equity per position for risk management.
+- Maintain a cash buffer of at least 25% of equity.
 - You can BUY stocks you don't hold, SELL stocks you do hold, or HOLD.
 - Consider momentum, mean reversion, breakouts, and sector rotation.
 - If a stock is down significantly and fundamentals are strong → consider BUY.
@@ -176,7 +191,7 @@ Return JSON: {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, 
                     content: `PORTFOLIO: $${account.equity} equity, $${account.cash} cash, $${account.buying_power} buying power
 POSITIONS: ${currentHoldings.length > 0 ? currentHoldings.join(", ") : "NONE"}
 OPEN ORDERS: ${Array.isArray(openOrders) ? openOrders.length : 0}
-MARKET OPEN: ${isMarketOpen() ? "YES" : "NO"}
+MARKET OPEN: ${marketOpen ? "YES" : "NO"} | NEXT OPEN: ${clock?.next_open || "unknown"} | NEXT CLOSE: ${clock?.next_close || "unknown"}
 
 REAL-TIME MARKET DATA:
 ${marketContext}
@@ -184,7 +199,7 @@ ${marketContext}
 NEWS HEADLINES:
 ${newsHeadlines.length > 0 ? newsHeadlines.map(h => `• ${h}`).join("\n") : "No recent news"}
 
-Analyze and make your trading decision. Be aggressive but smart.`
+Analyze and make your trading decision. Be conservative and smart.`
                 }
             ],
             response_format: { type: "json_object" }
@@ -214,7 +229,6 @@ Analyze and make your trading decision. Be aggressive but smart.`
         // 5. EXECUTE TRADE
         let tradeResult = `Decision: ${decision.action} — ${decision.reasoning}`;
         let tradeExecuted = false;
-        const marketOpen = isMarketOpen();
         const snap = snapshots[symbol];
         const bid = snap?.latestQuote?.bp;
         const ask = snap?.latestQuote?.ap;

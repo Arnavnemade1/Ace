@@ -30,7 +30,7 @@ export class SwarmOrchestrator {
     private isRunning = false;
     private cycleCounter = 0;
     private discordInterval = 30;   // Discord brief every 30 minutes
-    private executionInterval = 3;  // Execute signals every 3 cycles (cooldown)
+    private executionInterval = 6;  // Execute signals every 6 cycles (cooldown)
     private latestSentiment = 0.5;
 
     async start() {
