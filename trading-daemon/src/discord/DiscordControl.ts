@@ -6,6 +6,17 @@ const RISK_KEYWORDS = new Set(['minimal', 'cautious', 'standard']);
 const TOGGLE_KEYWORDS = new Set(['pause', 'resume']);
 const ALL_KEYWORDS = new Set([...STRATEGY_KEYWORDS, ...RISK_KEYWORDS, ...TOGGLE_KEYWORDS]);
 
+const STRATEGY_MATRIX: Record<string, { minConviction: number; signalThreshold: number; buyThreshold: number; maxAllocationPct: number }> = {
+    aggressive: { minConviction: 0.8, signalThreshold: 0.65, buyThreshold: 0.75, maxAllocationPct: 0.023 },
+    balanced: { minConviction: 0.85, signalThreshold: 0.7, buyThreshold: 0.8, maxAllocationPct: 0.02 },
+    conservative: { minConviction: 0.9, signalThreshold: 0.8, buyThreshold: 0.9, maxAllocationPct: 0.015 },
+};
+const RISK_MATRIX: Record<string, { lowRiskOnly: boolean; maxAllocationPct?: number; note: string }> = {
+    minimal: { lowRiskOnly: true, maxAllocationPct: 0.01, note: 'Low‑risk ETF only' },
+    standard: { lowRiskOnly: false, note: 'Standard universe' },
+    cautious: { lowRiskOnly: false, note: 'Standard universe' },
+};
+
 function extractChannelId(input?: string) {
     if (!input) return null;
     const match = input.match(/\d{10,}/g);
@@ -77,7 +88,18 @@ export async function startDiscordControl() {
                 at: new Date().toISOString(),
             };
 
-            const summary = `Strategy: ${nextConfig.strategy_bias || 'balanced'} | Risk: ${nextConfig.risk_profile || 'standard'} | Trading: ${nextConfig.trading_enabled === false ? 'paused' : 'enabled'}`;
+            const strategyKey = String(nextConfig.strategy_bias || 'balanced');
+            const riskKey = String(nextConfig.risk_profile || 'standard');
+            const strategy = STRATEGY_MATRIX[strategyKey] || STRATEGY_MATRIX.balanced;
+            const risk = RISK_MATRIX[riskKey] || RISK_MATRIX.standard;
+            const effectiveAllocation = risk.maxAllocationPct ?? strategy.maxAllocationPct;
+            const summary = `Strategy: ${strategyKey} | Risk: ${riskKey} | Trading: ${nextConfig.trading_enabled === false ? 'paused' : 'enabled'}`;
+            const detailLines = [
+                `• Min conviction: ${(strategy.minConviction * 100).toFixed(0)}%`,
+                `• Signal threshold: ${strategy.signalThreshold.toFixed(2)} | Buy threshold: ${strategy.buyThreshold.toFixed(2)}`,
+                `• Max allocation: ${(effectiveAllocation * 100).toFixed(2)}% equity`,
+                `• Mode: ${risk.note}${risk.lowRiskOnly ? ' (ETF only)' : ''}`,
+            ].join('\n');
             const { error } = await supabase
                 .from('agent_state')
                 .update({ config: nextConfig, updated_at: new Date().toISOString() })
@@ -95,7 +117,7 @@ export async function startDiscordControl() {
                 `Keywords: ${keywords.join(', ')} | ${summary}`
             );
 
-            await message.reply(`Directive applied: ${keywords.join(' ')}. ${summary}`);
+            await message.reply(`Directive applied: ${keywords.join(' ')}.\n${summary}\n${detailLines}`);
         } catch (e) {
             console.error('[DiscordControl] Failed to process directive:', e);
         }

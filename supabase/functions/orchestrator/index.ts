@@ -128,7 +128,15 @@ serve(async (req) => {
       .gte("created_at", dayStartNY.toISOString());
     const executedCount = executedToday?.length || 0;
 
-    const includeDeepThoughts = nowNY.getMinutes() % 30 === 0;
+    const { data: orchestratorState } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Orchestrator")
+      .maybeSingle();
+    const lastJournalAt = orchestratorState?.config?.last_journal_at
+      ? new Date(orchestratorState.config.last_journal_at).getTime()
+      : 0;
+    const includeDeepThoughts = !lastJournalAt || (Date.now() - lastJournalAt) >= 30 * 60 * 1000;
     let journalSummary = "";
     if (includeDeepThoughts) {
       const { data: portfolio } = await supabase
@@ -278,6 +286,10 @@ serve(async (req) => {
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       status: "idle",
+      config: {
+        ...(orchestratorState?.config || {}),
+        last_journal_at: includeDeepThoughts ? new Date().toISOString() : (orchestratorState?.config?.last_journal_at || null),
+      },
     }).eq("agent_name", "Orchestrator");
 
     return new Response(JSON.stringify({ success: true, mode, results }), {
