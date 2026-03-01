@@ -156,17 +156,22 @@ serve(async (req) => {
     });
 
     const capLine = executedCount >= DAILY_TRADE_CAP
-      ? `Daily cap: ${executedCount}/${DAILY_TRADE_CAP} (HIT) • resets in ${resetHours}h ${resetMins}m`
-      : `Daily cap: ${executedCount}/${DAILY_TRADE_CAP} • resets in ${resetHours}h ${resetMins}m`;
-    const lastTradeLine = `Last trade: ${formatAgo(lastTrade?.created_at)}`;
+      ? `**Daily Cap:** ${executedCount}/${DAILY_TRADE_CAP} (HIT)`
+      : `**Daily Cap:** ${executedCount}/${DAILY_TRADE_CAP}`;
+    const resetLine = `**Reset In:** ${resetHours}h ${resetMins}m`;
+    const lastTradeLine = `**Last Trade:** ${formatAgo(lastTrade?.created_at)}`;
+
+    const agentLines = summaryLines.map((line) => `- ${line.replace(/^•\s?/, "")}`);
 
     await sendDiscord(
       [
-        `🛰️ ACE Orchestrator (${mode}) — ${successCount}/${results.length} ok in ${totalDuration}ms`,
-        capLine,
-        lastTradeLine,
-        ...summaryLines,
-        includeDeepThoughts && journalSummary ? `📝 Journal (30m)\n${journalSummary}` : "",
+        `🛰️ **ACE Orchestrator — ${mode.toUpperCase()}**`,
+        `**Status:** ${successCount}/${results.length} ok in ${totalDuration}ms`,
+        `${capLine} • ${resetLine} • ${lastTradeLine}`,
+        "",
+        "**Agent Results**",
+        ...agentLines,
+        includeDeepThoughts && journalSummary ? `\n**Journal (30m)**\n${journalSummary}` : "",
       ].filter(Boolean).join("\n")
     );
 

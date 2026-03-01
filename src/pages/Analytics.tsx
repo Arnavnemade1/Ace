@@ -261,7 +261,7 @@ const BloombergChart = ({ streamKey, data, onExpand }: { streamKey: string; data
 const Marquee = ({ headlines }: { headlines: string[] }) => {
     const text = [...headlines, ...headlines].join("   ✦   ");
     return (
-        <div className="fixed top-16 left-0 right-0 z-50 h-9 flex items-center bg-black border-b border-[#00ff41]/30 overflow-hidden">
+        <div className="fixed top-0 left-0 right-0 z-50 h-9 flex items-center bg-black border-b border-[#00ff41]/30 overflow-hidden">
             <div className="shrink-0 flex items-center gap-2 bg-[#00ff41] text-black font-black text-[10px] h-full px-4 tracking-widest uppercase shadow-[10px_0_25px_rgba(0,255,65,0.4)] z-10">
                 <Newspaper className="w-3.5 h-3.5" /> LIVE
             </div>
@@ -295,6 +295,35 @@ const Analytics = () => {
     const [cryptoPrices, setCryptoPrices] = useState<Record<string, number>>({});
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
+
+    /* Load latest headlines on boot */
+    useEffect(() => {
+        const loadHeadlines = async () => {
+            try {
+                const { data } = await supabase
+                    .from("live_api_streams")
+                    .select("source, payload")
+                    .in("source", ["NewsAPI", "NewsData.io"])
+                    .order("created_at", { ascending: false })
+                    .limit(6);
+
+                if (!data || data.length === 0) return;
+                const hs: string[] = [];
+                for (const row of data) {
+                    if (Array.isArray(row.payload)) {
+                        const items = row.payload.slice(0, 3).map((a: any) => `[${row.source}] ${a.title || "UPDATE"}`);
+                        hs.push(...items);
+                    }
+                }
+                if (hs.length > 0) {
+                    setHeadlines(prev => [...hs, ...prev].slice(0, 14));
+                }
+            } catch (e) {
+                console.error("Failed to load headlines:", e);
+            }
+        };
+        loadHeadlines();
+    }, []);
 
     /* Fetch real Alpaca prices on load */
     useEffect(() => {
@@ -439,7 +468,7 @@ const Analytics = () => {
     const streamKeys = Object.keys(STREAMS);
 
     return (
-        <div className="min-h-screen bg-[#060807] pt-24 pb-16 font-mono text-xs text-white">
+        <div className="min-h-screen bg-[#060807] pt-28 pb-16 font-mono text-xs text-white">
             <Marquee headlines={headlines} />
 
             {/* Fullscreen Modal */}
