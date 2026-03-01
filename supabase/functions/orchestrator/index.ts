@@ -22,6 +22,20 @@ serve(async (req) => {
 
     const baseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const DISCORD_WEBHOOK_URL = Deno.env.get("DISCORD_WEBHOOK_URL");
+
+    const sendDiscord = async (content: string) => {
+      if (!DISCORD_WEBHOOK_URL) return;
+      try {
+        await fetch(DISCORD_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        });
+      } catch (e) {
+        console.error("Discord failed:", e);
+      }
+    };
 
     const callAgent = async (functionName: string) => {
       const start = Date.now();
@@ -79,6 +93,21 @@ serve(async (req) => {
 
     const successCount = results.filter((r) => r.success).length;
     const totalDuration = results.reduce((sum, r) => sum + r.duration, 0);
+
+    const summaryLines = results.map((r) => {
+      let extra = "";
+      if (r.function === "market-scanner") extra = `signals=${r.data?.signals_found ?? "?"}`;
+      if (r.function === "sentiment-analyst") extra = `sentiment=${r.data?.sentiment?.overall_score ?? "?"}`;
+      if (r.function === "strategy-engine") extra = `decisions=${r.data?.decisions?.length ?? 0}`;
+      if (r.function === "risk-controller") extra = r.data?.message ? `msg=${r.data.message}` : "";
+      if (r.function === "execution-agent") extra = r.data?.message ? `msg=${r.data.message}` : "";
+      if (r.function === "portfolio-optimizer") extra = r.data?.reason ? `reason=${r.data.reason}` : "";
+      return `• ${r.function}: ${r.success ? "OK" : "FAIL"} ${extra}`.trim();
+    });
+
+    await sendDiscord(
+      `🛰️ ACE Orchestrator (${mode}) — ${successCount}/${results.length} ok in ${totalDuration}ms\n${summaryLines.join("\n")}`
+    );
 
     await supabase.from("agent_logs").insert({
       agent_name: "Orchestrator",

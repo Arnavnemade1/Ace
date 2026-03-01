@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.swarm-orchestrator]
 verify_jwt = false
+
+[functions.analytics-ingestor]
+verify_jwt = false
