@@ -1,16 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Cpu, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { Cpu, Wifi, WifiOff, Loader2, Zap } from "lucide-react";
 
 export const HandshakeOverlay = () => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastHeartbeat, setLastHeartbeat] = useState<number>(0);
     const [isChecking, setIsChecking] = useState(true);
+    const [isTriggering, setIsTriggering] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+    const triggerOrchestrator = useCallback(async () => {
+        setIsTriggering(true);
+        setErrorMsg(null);
+        try {
+            const { data, error } = await supabase.functions.invoke('orchestrator', {
+                body: { mode: 'full_cycle' }
+            });
+            if (error) throw error;
+            setIsConnected(true);
+            setLastHeartbeat(Date.now());
+        } catch (err: any) {
+            setErrorMsg(err?.message || 'Failed to trigger orchestrator');
+        } finally {
+            setIsTriggering(false);
+        }
+    }, []);
+
     useEffect(() => {
-        // Initial check for recent activity (last 30 seconds)
         const checkConnection = async () => {
             const { data, error } = await supabase
                 .from('agent_logs')
@@ -24,7 +41,7 @@ export const HandshakeOverlay = () => {
             } else if (data) {
                 const lastSeen = new Date(data.created_at).getTime();
                 const now = Date.now();
-                if (now - lastSeen < 30000) {
+                if (now - lastSeen < 120000) {
                     setIsConnected(true);
                     setLastHeartbeat(lastSeen);
                     setErrorMsg(null);
@@ -35,18 +52,16 @@ export const HandshakeOverlay = () => {
 
         checkConnection();
 
-        // Listen for new heartbeats or logs
         const channel = supabase.channel('handshake-monitor')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, (payload) => {
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, () => {
                 setIsConnected(true);
                 setLastHeartbeat(Date.now());
                 setErrorMsg(null);
             })
             .subscribe();
 
-        // Fail-safe: if no heartbeat for 60 seconds, show offline
         const interval = setInterval(() => {
-            if (lastHeartbeat > 0 && Date.now() - lastHeartbeat > 60000) {
+            if (lastHeartbeat > 0 && Date.now() - lastHeartbeat > 120000) {
                 setIsConnected(false);
             }
         }, 10000);
@@ -64,7 +79,7 @@ export const HandshakeOverlay = () => {
                     initial={{ y: -20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: -20, opacity: 0 }}
-                    className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
+                    className="fixed top-24 left-1/2 -translate-x-1/2 z-[100]"
                 >
                     <div className="bg-black/80 backdrop-blur-xl border border-red-500/20 px-4 py-2 rounded-full flex items-center gap-3 shadow-2xl">
                         <div className="relative">
@@ -72,13 +87,47 @@ export const HandshakeOverlay = () => {
                             <div className="absolute inset-0 bg-red-500 blur-sm rounded-full animate-pulse opacity-50" />
                         </div>
                         <span className="text-[9px] font-mono text-white/60 uppercase tracking-widest">
-                            Daemon Disconnected
+                            Daemon Offline
                         </span>
                         <div className="h-2 w-px bg-white/10" />
-                        <span className="text-[8px] font-mono text-white/30 uppercase tracking-tighter">
-                            {errorMsg ? `Supabase: ${errorMsg}` : 'Check npm run daemon'}
-                        </span>
+                        <button
+                            onClick={triggerOrchestrator}
+                            disabled={isTriggering}
+                            className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-primary hover:text-white transition-colors disabled:opacity-50 pointer-events-auto"
+                        >
+                            {isTriggering ? (
+                                <><Loader2 className="w-3 h-3 animate-spin" /> Handshaking...</>
+                            ) : (
+                                <><Zap className="w-3 h-3" /> Trigger Handshake</>
+                            )}
+                        </button>
+                        {errorMsg && (
+                            <>
+                                <div className="h-2 w-px bg-white/10" />
+                                <span className="text-[8px] font-mono text-red-400/70 max-w-32 truncate">{errorMsg}</span>
+                            </>
+                        )}
                     </div>
+                </motion.div>
+            )}
+            {isConnected && (
+                <motion.div
+                    initial={{ y: -20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -20, opacity: 0 }}
+                    className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
+                >
+                    <motion.div
+                        initial={{ scale: 1 }}
+                        animate={{ opacity: [1, 0] }}
+                        transition={{ delay: 3, duration: 1 }}
+                        className="bg-black/80 backdrop-blur-xl border border-primary/30 px-4 py-2 rounded-full flex items-center gap-3 shadow-2xl"
+                    >
+                        <Wifi className="w-3 h-3 text-primary" />
+                        <span className="text-[9px] font-mono text-primary uppercase tracking-widest">
+                            Daemon Connected
+                        </span>
+                    </motion.div>
                 </motion.div>
             )}
         </AnimatePresence>

@@ -72,7 +72,7 @@ serve(async (req) => {
         }
 
         const brainPrompt = {
-            model: "gpt-4o",
+            model: "google/gemini-3-flash-preview",
             messages: [
                 { role: "system", content: "You are the ACE_OS Omni-Brain. Review market context and portfolio. Decide: BUY, SELL, or HOLD for the provided symbol. Return JSON with 'action' (BUY/SELL/HOLD) and 'reasoning' (string)." },
                 { role: "user", content: `SYMBOL: ${symbolToEvaluate}\nPortfolio: $${account.equity} equity, $${account.buying_power} cash. Current Holdings: ${currentHoldings.join(", ")}\nNews: ${newsHeadlines.join(" | ")}\n\nDecision? (JSON)` }
@@ -146,9 +146,9 @@ serve(async (req) => {
             headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
 
-    } catch (error) {
+    } catch (error: unknown) {
         console.error("Cycle Error:", error);
-        return new Response(JSON.stringify({ error: error.message }), {
+        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
             status: 500,
             headers: { ...corsHeaders, "Content-Type": "application/json" }
         });

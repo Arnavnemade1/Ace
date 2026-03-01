@@ -83,13 +83,40 @@ export type Database = {
         }
         Relationships: []
       }
+      live_api_streams: {
+        Row: {
+          created_at: string
+          id: string
+          payload: Json
+          source: string
+          symbol_or_context: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          payload: Json
+          source: string
+          symbol_or_context: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          payload?: Json
+          source?: string
+          symbol_or_context?: string
+        }
+        Relationships: []
+      }
       portfolio_state: {
         Row: {
+          buying_power: number | null
           cash: number
           created_at: string
           daily_pnl: number | null
+          equity: number | null
           id: string
           max_drawdown: number | null
+          orders: Json | null
           positions: Json
           sharpe_ratio: number | null
           total_pnl: number | null
@@ -99,11 +126,14 @@ export type Database = {
           win_rate: number | null
         }
         Insert: {
+          buying_power?: number | null
           cash?: number
           created_at?: string
           daily_pnl?: number | null
+          equity?: number | null
           id?: string
           max_drawdown?: number | null
+          orders?: Json | null
           positions?: Json
           sharpe_ratio?: number | null
           total_pnl?: number | null
@@ -113,11 +143,14 @@ export type Database = {
           win_rate?: number | null
         }
         Update: {
+          buying_power?: number | null
           cash?: number
           created_at?: string
           daily_pnl?: number | null
+          equity?: number | null
           id?: string
           max_drawdown?: number | null
+          orders?: Json | null
           positions?: Json
           sharpe_ratio?: number | null
           total_pnl?: number | null
