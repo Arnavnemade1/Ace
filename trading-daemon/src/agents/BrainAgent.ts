@@ -73,7 +73,7 @@ Evaluate this opportunity. Provide a definitive Action, Reasoning, and Convictio
 `;
 
             const response = await axios.post(this.baseUrl, {
-                model: 'gpt-4o', // or similar high-end model supported by the gateway
+                model: 'google/gemini-3-flash-preview',
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
