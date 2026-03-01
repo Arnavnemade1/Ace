@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const API_KEY = process.env.ALPACA_API_KEY;
-const API_SECRET = process.env.ALPACA_SECRET_KEY;
+const API_SECRET = process.env.ALPACA_SECRET_KEY || process.env.ALPACA_API_SECRET;
 const BASE_URL = process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets';
 
 if (!API_KEY || !API_SECRET) {
