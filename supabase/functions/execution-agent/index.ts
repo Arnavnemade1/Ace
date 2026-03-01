@@ -66,7 +66,7 @@ serve(async (req) => {
     const DISCORD_WEBHOOK_URL = Deno.env.get("DISCORD_WEBHOOK_URL");
     if (!ALPACA_API_KEY || !ALPACA_API_SECRET) throw new Error("Alpaca keys not configured");
 
-    await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Execution Agent");
+    await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Order Agent");
 
     const { data: directiveState } = await supabase
       .from("agent_state")
@@ -79,7 +79,7 @@ serve(async (req) => {
     const tradingEnabled = directive.trading_enabled !== false;
     if (!tradingEnabled) {
       await supabase.from("agent_logs").insert({
-        agent_name: "Execution Agent",
+        agent_name: "Order Agent",
         log_type: "info",
         message: "Trading paused via Discord directive. Skipping execution.",
         reasoning: `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`,
@@ -109,12 +109,12 @@ serve(async (req) => {
     const marketOpen = clock?.is_open ?? isMarketOpen();
 
     await supabase.from("agent_logs").insert({
-      agent_name: "Execution Agent",
+      agent_name: "Order Agent",
       log_type: "info",
       message: `Market ${marketOpen ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"} | Next close: ${clock?.next_close || "unknown"}`,
     });
     await supabase.from("agent_logs").insert({
-      agent_name: "Execution Agent",
+      agent_name: "Order Agent",
       log_type: "info",
       message: "Order routing: market orders during open; GTC limit orders when closed. BUY opens long positions; SELL exits existing positions.",
     });
@@ -142,7 +142,7 @@ serve(async (req) => {
     const positionSymbols = new Set(Array.isArray(positions) ? positions.map((p: any) => p.symbol) : []);
 
     await supabase.from("agent_logs").insert({
-      agent_name: "Execution Agent",
+      agent_name: "Order Agent",
       log_type: "learning",
       message: "Journal — Execution posture",
       reasoning: [
@@ -154,7 +154,7 @@ serve(async (req) => {
 
     if (buyingPower < MIN_BUYING_POWER) {
       await supabase.from("agent_logs").insert({
-        agent_name: "Execution Agent",
+        agent_name: "Order Agent",
         log_type: "info",
         message: `Buying power below $${MIN_BUYING_POWER}. Skipping execution.`,
       });
@@ -290,7 +290,7 @@ serve(async (req) => {
         processed++;
 
         await supabase.from("agent_logs").insert({
-          agent_name: "Execution Agent",
+          agent_name: "Order Agent",
           log_type: "trade",
           message: `${finalStatus === "executed" ? "✅" : "⚠️"} ${trade.side} ${trade.qty} ${trade.symbol} @ $${fillPrice.toFixed(2)} (${trade.strategy})`,
           reasoning: trade.reasoning,
@@ -310,7 +310,7 @@ serve(async (req) => {
               trade.reasoning ? `Signal: ${trade.reasoning}` : "",
             ].filter(Boolean).join("\n"),
             color: 0x00ff41,
-            footer: { text: "ACE_OS Execution Agent" },
+            footer: { text: "ACE_OS Order Agent" },
             timestamp: new Date().toISOString(),
           }]);
         }
@@ -377,13 +377,13 @@ serve(async (req) => {
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       status: "idle",
-    }).eq("agent_name", "Execution Agent");
+    }).eq("agent_name", "Order Agent");
 
     return new Response(JSON.stringify({ success: true, results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("Execution Agent error:", e);
+    console.error("Order Agent error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
