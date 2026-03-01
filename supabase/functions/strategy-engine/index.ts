@@ -11,6 +11,9 @@ const MIN_BUYING_POWER = 1000;
 const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
 const MAX_OPEN_POSITIONS = 8;
+const LOSS_RECOVERY_PNL_PCT = -0.01;
+const LOSS_RECOVERY_MAX_DRAWDOWN = 0.03;
+const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
 async function getMarketClock(key?: string, secret?: string) {
   if (!key || !secret) return null;
@@ -96,6 +99,13 @@ serve(async (req) => {
       .order("executed_at", { ascending: false })
       .limit(10);
 
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentSymbols } = await supabase
+      .from("trades")
+      .select("symbol")
+      .gte("created_at", oneDayAgo);
+    const recentlyTradedSymbols = new Set((recentSymbols || []).map((t: any) => t.symbol));
+
     // Fetch real prices from Alpaca for sizing
     let snapshots: Record<string, any> = {};
     if (ALPACA_API_KEY && ALPACA_API_SECRET) {
@@ -148,8 +158,17 @@ serve(async (req) => {
     const currentPositions = positions.length > 0 ? positions : (portfolio?.positions || []);
     const maxAllocation = portfolioValue * MAX_ALLOCATION_PCT;
     const minCashBuffer = portfolioValue * CASH_BUFFER_PCT;
+    const dailyPnl = account?.last_equity
+      ? Number(account.equity) - Number(account.last_equity)
+      : Number(portfolio?.daily_pnl || 0);
+    const dailyPnlPct = account?.last_equity
+      ? dailyPnl / Number(account.last_equity || 1)
+      : (portfolioValue ? dailyPnl / portfolioValue : 0);
+    const maxDrawdown = Number(portfolio?.max_drawdown || 0);
+    const lossRecoveryMode = dailyPnlPct <= LOSS_RECOVERY_PNL_PCT || maxDrawdown >= LOSS_RECOVERY_MAX_DRAWDOWN;
+    const effectiveMaxAllocation = lossRecoveryMode ? portfolioValue * 0.01 : maxAllocation;
 
-    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}`;
+    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}, Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`;
 
     const tradeHistory = recentTrades?.map((t) =>
       `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
@@ -179,11 +198,12 @@ IMPORTANT RULES:
 - Do NOT recommend new BUYs if cash buffer is below ${CASH_BUFFER_PCT * 100}% of equity.
 - Do NOT recommend trades if buying power is below $${MIN_BUYING_POWER}.
 - Consider existing positions to avoid over-concentration.
-- Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.`,
+- Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.
+- LOSS RECOVERY MODE: if active, only consider low-risk symbols (${Array.from(LOW_RISK_SYMBOLS).join(", ")}) and size at 1% of equity.`,
           },
           {
             role: "user",
-            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nMarket Clock: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next Open: ${clock?.next_open || "unknown"} | Next Close: ${clock?.next_close || "unknown"}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. If market is closed, still recommend if you would queue a GTC limit order at open.`,
+            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nMode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}\n\nMarket Clock: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next Open: ${clock?.next_open || "unknown"} | Next Close: ${clock?.next_close || "unknown"}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. If market is closed, still recommend if you would queue a GTC limit order at open.`,
           },
         ],
         tools: [
@@ -243,8 +263,11 @@ IMPORTANT RULES:
       if (buyingPower < MIN_BUYING_POWER) return false;
       if (cash < minCashBuffer) return false;
       if (heldSymbols.has(d.symbol)) return false;
+      if (recentlyTradedSymbols.has(d.symbol)) return false;
       if (currentPositions.length >= MAX_OPEN_POSITIONS) return false;
-      const maxQty = Math.max(1, Math.floor(maxAllocation / price));
+      if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(d.symbol)) return false;
+      if (lossRecoveryMode && strength < 0.85) return false;
+      const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
       d.qty = Math.min(d.qty, maxQty);
       return d.qty >= 1;
     });
@@ -278,6 +301,22 @@ IMPORTANT RULES:
       message: `Processed ${signals.length} signals → ${decisions.length} trades recommended`,
       reasoning: decisions.map((d) => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; ") || "No trades recommended.",
       metadata: { signal_count: signals.length, trade_count: decisions.length },
+    });
+
+    await supabase.from("agent_logs").insert({
+      agent_name: "Strategy Engine",
+      log_type: "learning",
+      message: "Journal — Strategy Engine cycle reflection",
+      reasoning: [
+        `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Market: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"}`,
+        `Signals reviewed: ${signals.length}, Trades recommended: ${decisions.length}`,
+        `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)} | Buying power: $${buyingPower.toFixed(2)}`,
+        `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
+        lossRecoveryMode
+          ? "Focus: low-risk symbols only; reduce size and protect capital until recovery."
+          : "Focus: patient, high-conviction entries with strict sizing.",
+      ].join(" | "),
     });
 
     await supabase.from("agent_state").update({

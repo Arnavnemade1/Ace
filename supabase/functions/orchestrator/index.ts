@@ -23,6 +23,27 @@ serve(async (req) => {
     const baseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const DISCORD_WEBHOOK_URL = Deno.env.get("DISCORD_WEBHOOK_URL");
+    const NY_TZ = "America/New_York";
+    const DAILY_TRADE_CAP = 5;
+
+    const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
+    const dayStartNY = new Date(nowNY);
+    dayStartNY.setHours(0, 0, 0, 0);
+    const nextMidnightNY = new Date(dayStartNY);
+    nextMidnightNY.setDate(nextMidnightNY.getDate() + 1);
+    const msUntilReset = nextMidnightNY.getTime() - nowNY.getTime();
+    const resetHours = Math.max(0, Math.floor(msUntilReset / 3600000));
+    const resetMins = Math.max(0, Math.floor((msUntilReset % 3600000) / 60000));
+
+    const formatAgo = (ts?: string | null) => {
+      if (!ts) return "unknown";
+      const ageMs = Date.now() - new Date(ts).getTime();
+      const mins = Math.max(0, Math.round(ageMs / 60000));
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return `${hrs}h ${rem}m ago`;
+    };
 
     const sendDiscord = async (content: string) => {
       if (!DISCORD_WEBHOOK_URL) return;
@@ -94,6 +115,35 @@ serve(async (req) => {
     const successCount = results.filter((r) => r.success).length;
     const totalDuration = results.reduce((sum, r) => sum + r.duration, 0);
 
+    const { data: lastTrade } = await supabase
+      .from("trades")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const { data: executedToday } = await supabase
+      .from("trades")
+      .select("id")
+      .eq("status", "executed")
+      .gte("created_at", dayStartNY.toISOString());
+    const executedCount = executedToday?.length || 0;
+
+    const includeDeepThoughts = nowNY.getMinutes() % 30 === 0;
+    let journalSummary = "";
+    if (includeDeepThoughts) {
+      const { data: journals } = await supabase
+        .from("agent_logs")
+        .select("agent_name, reasoning, created_at")
+        .eq("log_type", "learning")
+        .order("created_at", { ascending: false })
+        .limit(6);
+      if (journals && journals.length > 0) {
+        journalSummary = journals
+          .map((j: any) => `• ${j.agent_name}: ${String(j.reasoning || "").slice(0, 220)}`)
+          .join("\n");
+      }
+    }
+
     const summaryLines = results.map((r) => {
       let extra = "";
       if (r.function === "market-scanner") extra = `signals=${r.data?.signals_found ?? "?"}`;
@@ -105,9 +155,32 @@ serve(async (req) => {
       return `• ${r.function}: ${r.success ? "OK" : "FAIL"} ${extra}`.trim();
     });
 
+    const capLine = executedCount >= DAILY_TRADE_CAP
+      ? `Daily cap: ${executedCount}/${DAILY_TRADE_CAP} (HIT) • resets in ${resetHours}h ${resetMins}m`
+      : `Daily cap: ${executedCount}/${DAILY_TRADE_CAP} • resets in ${resetHours}h ${resetMins}m`;
+    const lastTradeLine = `Last trade: ${formatAgo(lastTrade?.created_at)}`;
+
     await sendDiscord(
-      `🛰️ ACE Orchestrator (${mode}) — ${successCount}/${results.length} ok in ${totalDuration}ms\n${summaryLines.join("\n")}`
+      [
+        `🛰️ ACE Orchestrator (${mode}) — ${successCount}/${results.length} ok in ${totalDuration}ms`,
+        capLine,
+        lastTradeLine,
+        ...summaryLines,
+        includeDeepThoughts && journalSummary ? `📝 Journal (30m)\n${journalSummary}` : "",
+      ].filter(Boolean).join("\n")
     );
+
+    await supabase.from("agent_logs").insert({
+      agent_name: "Orchestrator",
+      log_type: "learning",
+      message: "Journal — Orchestrator cycle summary",
+      reasoning: [
+        `Mode: ${mode}`,
+        `Success: ${successCount}/${results.length}`,
+        summaryLines.join(" | "),
+      ].join(" | "),
+      metadata: { mode, successCount, totalDuration },
+    });
 
     await supabase.from("agent_logs").insert({
       agent_name: "Orchestrator",

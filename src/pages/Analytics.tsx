@@ -474,6 +474,21 @@ const Analytics = () => {
                     </div>
                 </div>
 
+                {/* Top Headlines */}
+                <div className="border border-white/5 bg-[#0b0d0c] rounded p-3 mb-4">
+                    <div className="text-[10px] tracking-widest uppercase text-[#00ff41]/70 mb-2 flex items-center gap-1.5 border-b border-white/5 pb-1.5">
+                        <Newspaper className="w-3 h-3" /> TOP HEADLINES
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] text-white/70">
+                        {headlines.slice(0, 6).map((h, i) => (
+                            <div key={`${h}-${i}`} className="flex items-start gap-2">
+                                <span className="text-[#00ff41]/60 font-mono">{String(i + 1).padStart(2, "0")}.</span>
+                                <span className="leading-relaxed">{h}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
                 {/* 10 Chart Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
                     {streamKeys.map(k => (

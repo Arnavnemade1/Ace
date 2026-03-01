@@ -15,6 +15,9 @@ const CASH_BUFFER_PCT = 0.25;
 const MAX_ALLOCATION_PCT = 0.02;
 const MAX_TRADES_PER_DAY = 5;
 const MAX_OPEN_POSITIONS = 8;
+const LOSS_RECOVERY_PNL_PCT = -0.01;
+const LOSS_RECOVERY_MAX_DRAWDOWN = 0.03;
+const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
 function isMarketOpen(): boolean {
   const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
@@ -157,9 +160,23 @@ serve(async (req) => {
     const cash = account ? parseFloat(account.cash) : 0;
     const buyingPower = account ? parseFloat(account.buying_power) : 0;
     const minCashBuffer = equity * CASH_BUFFER_PCT;
-    const maxAllocation = equity * MAX_ALLOCATION_PCT;
+    const dailyPnl = account?.last_equity ? (parseFloat(account.equity) - parseFloat(account.last_equity)) : 0;
+    const dailyPnlPct = account?.last_equity ? dailyPnl / parseFloat(account.last_equity) : 0;
+    const lossRecoveryMode = dailyPnlPct <= LOSS_RECOVERY_PNL_PCT;
+    const maxAllocation = lossRecoveryMode ? equity * 0.01 : equity * MAX_ALLOCATION_PCT;
     const positionSymbols = new Set(Array.isArray(positions) ? positions.map((p: any) => p.symbol) : []);
     const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
+
+    await supabase.from("agent_logs").insert({
+      agent_name: "Execution Agent",
+      log_type: "learning",
+      message: "Journal — Execution posture",
+      reasoning: [
+        `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
+        `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)}`,
+      ].join(" | "),
+    });
 
     if (buyingPower < MIN_BUYING_POWER) {
       await supabase.from("agent_logs").insert({
@@ -209,6 +226,15 @@ serve(async (req) => {
             reasoning: "Skipped: no position to sell.",
           }).eq("id", trade.id);
           results.push({ trade_id: trade.id, status: "failed", error: "no position" });
+          continue;
+        }
+
+        if (trade.side === "BUY" && lossRecoveryMode && !LOW_RISK_SYMBOLS.has(trade.symbol)) {
+          await supabase.from("trades").update({
+            status: "failed",
+            reasoning: "Skipped: loss recovery mode restricts buys to low-risk symbols.",
+          }).eq("id", trade.id);
+          results.push({ trade_id: trade.id, status: "failed", error: "loss recovery restriction" });
           continue;
         }
 

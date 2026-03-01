@@ -12,6 +12,9 @@ const MIN_BUYING_POWER = 1000;
 const CASH_BUFFER_PCT = 0.25;
 const MAX_OPEN_POSITIONS = 8;
 const MAX_TRADES_PER_DAY = 5;
+const LOSS_RECOVERY_PNL_PCT = -0.01;
+const LOSS_RECOVERY_MAX_DRAWDOWN = 0.03;
+const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -49,6 +52,9 @@ serve(async (req) => {
     const positions = portfolio?.positions || [];
     const minCashBuffer = portfolioValue * CASH_BUFFER_PCT;
     const positionSymbols = new Set((positions || []).map((p: any) => p.symbol));
+    const dailyPnlPct = portfolioValue ? dailyPnl / portfolioValue : 0;
+    const maxDrawdown = Number(portfolio?.max_drawdown || 0);
+    const lossRecoveryMode = dailyPnlPct <= LOSS_RECOVERY_PNL_PCT || maxDrawdown >= LOSS_RECOVERY_MAX_DRAWDOWN;
 
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: executedToday } = await supabase
@@ -95,7 +101,8 @@ Rules (MINDFUL):
 Current positions: ${JSON.stringify(positions)}
 Cash available: $${cash}
 
-IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.`,
+IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.
+LOSS RECOVERY MODE: ${lossRecoveryMode ? "ACTIVE" : "INACTIVE"} (if active, only approve low-risk symbols: ${Array.from(LOW_RISK_SYMBOLS).join(", ")})`,
           },
           {
             role: "user",
@@ -165,6 +172,11 @@ IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.`,
           rejected++;
           continue;
         }
+        if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(trade.symbol)) {
+          await supabase.from("trades").update({ status: "cancelled", reasoning: "Risk rejected: loss recovery mode restricts buys to low-risk symbols." }).eq("id", trade.id);
+          rejected++;
+          continue;
+        }
       }
       if (trade.side === "SELL" && !positionSymbols.has(trade.symbol)) {
         await supabase.from("trades").update({ status: "cancelled", reasoning: "Risk rejected: no existing position to sell." }).eq("id", trade.id);
@@ -173,7 +185,10 @@ IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.`,
       }
 
       if (decision.approved) {
-        const newQty = decision.adjusted_qty || trade.qty;
+        let newQty = decision.adjusted_qty || trade.qty;
+        if (lossRecoveryMode && trade.side === "BUY") {
+          newQty = Math.max(1, Math.floor(newQty * 0.5));
+        }
         await supabase.from("trades").update({
           qty: Math.max(1, Math.round(newQty)),
           status: "pending",
@@ -198,6 +213,18 @@ IMPORTANT: Be conservative. If in doubt, HOLD/REJECT.`,
       log_type: "decision",
       message: `Reviewed ${pendingTrades.length} trades: ${approved} approved, ${rejected} rejected. VaR: ${riskResult.portfolio_var}%`,
       metadata: { approved, rejected, portfolio_var: riskResult.portfolio_var },
+    });
+
+    await supabase.from("agent_logs").insert({
+      agent_name: "Risk Controller",
+      log_type: "learning",
+      message: "Journal — Risk posture update",
+      reasoning: [
+        `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
+        `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)}`,
+        `Approvals: ${approved}, Rejections: ${rejected}`,
+      ].join(" | "),
     });
 
     await supabase.from("agent_state").update({

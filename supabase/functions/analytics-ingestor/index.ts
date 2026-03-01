@@ -16,6 +16,13 @@ const KEYS = {
 };
 
 const DEFAULT_SYMBOLS = ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "META"];
+const SYMBOL_SAMPLE_SIZE = 200;
+const PROVIDER_SAMPLE_SIZE = {
+  ALPHA_VANTAGE: 5,
+  FINNHUB: 10,
+  MARKETSTACK: 5,
+  TWELVEDATA: 5,
+};
 
 async function safeFetchJson(url: string) {
   try {
@@ -43,14 +50,14 @@ serve(async (req) => {
       .eq("agent_name", "Market Scanner")
       .maybeSingle();
     const lastSymbols = (scanState?.config?.last_symbols || []) as string[];
-    const symbols = (lastSymbols.length > 0 ? lastSymbols : DEFAULT_SYMBOLS).slice(0, 8);
-    const contextQuery = symbols.length > 0 ? `(${symbols.slice(0, 3).join(" OR ")}) AND market` : "stock market";
+    const symbols = (lastSymbols.length > 0 ? lastSymbols : DEFAULT_SYMBOLS).slice(0, SYMBOL_SAMPLE_SIZE);
+    const contextQuery = symbols.length > 0 ? `(${symbols.slice(0, 5).join(" OR ")}) AND market` : "stock market";
 
     const rows: any[] = [];
 
     // Alpha Vantage
     if (KEYS.ALPHA_VANTAGE) {
-      for (const sym of symbols.slice(0, 3)) {
+      for (const sym of symbols.slice(0, PROVIDER_SAMPLE_SIZE.ALPHA_VANTAGE)) {
         const data = await safeFetchJson(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${sym}&apikey=${KEYS.ALPHA_VANTAGE}`);
         if (data?.["Global Quote"]) {
           rows.push({ source: "AlphaVantage", symbol_or_context: sym, payload: data["Global Quote"] });
@@ -60,7 +67,7 @@ serve(async (req) => {
 
     // Finnhub
     if (KEYS.FINNHUB) {
-      for (const sym of symbols.slice(0, 3)) {
+      for (const sym of symbols.slice(0, PROVIDER_SAMPLE_SIZE.FINNHUB)) {
         const data = await safeFetchJson(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${KEYS.FINNHUB}`);
         if (data) rows.push({ source: "Finnhub", symbol_or_context: sym, payload: data });
       }
@@ -68,7 +75,7 @@ serve(async (req) => {
 
     // MarketStack
     if (KEYS.MARKETSTACK) {
-      for (const sym of symbols.slice(0, 2)) {
+      for (const sym of symbols.slice(0, PROVIDER_SAMPLE_SIZE.MARKETSTACK)) {
         const data = await safeFetchJson(`https://api.marketstack.com/v2/eod/latest?access_key=${KEYS.MARKETSTACK}&symbols=${sym}`);
         const row = data?.data?.[0];
         if (row) rows.push({ source: "MarketStack", symbol_or_context: sym, payload: row });
@@ -77,7 +84,7 @@ serve(async (req) => {
 
     // TwelveData
     if (KEYS.TWELVEDATA) {
-      for (const sym of symbols.slice(0, 2)) {
+      for (const sym of symbols.slice(0, PROVIDER_SAMPLE_SIZE.TWELVEDATA)) {
         const data = await safeFetchJson(`https://api.twelvedata.com/quote?symbol=${sym}&apikey=${KEYS.TWELVEDATA}`);
         if (data?.close) rows.push({ source: "TwelveData", symbol_or_context: sym, payload: data });
       }
@@ -121,8 +128,8 @@ serve(async (req) => {
     await supabase.from("agent_logs").insert({
       agent_name: "Analytics Ingestor",
       log_type: "info",
-      message: `Ingested ${rows.length} external data payloads for analytics.`,
-      metadata: { symbols, sources: rows.map((r) => r.source) },
+      message: `Ingested ${rows.length} external data payloads for analytics (sampled ${symbols.length} symbols).`,
+      metadata: { symbols_sampled: symbols.length, symbols, sources: rows.map((r) => r.source) },
     });
 
     if (DISCORD_WEBHOOK_URL) {
@@ -130,7 +137,7 @@ serve(async (req) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: `🧠 Analytics Ingestor updated ${rows.length} feeds (${symbols.join(", ")})`,
+          content: `🧠 Analytics Ingestor updated ${rows.length} feeds (sampled ${symbols.length} symbols)`,
         }),
       });
     }
