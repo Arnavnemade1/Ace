@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock } from "lucide-react";
+import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock, Eye } from "lucide-react";
 
 interface AgentLog {
     id: string;
@@ -9,6 +9,7 @@ interface AgentLog {
     agent: string;
     type: string;
     message: string;
+    reasoning?: string | null;
 }
 
 const AgentArena = () => {
@@ -25,6 +26,7 @@ const AgentArena = () => {
     const [sideFilter, setSideFilter] = useState("All");
     const [showAllPositions, setShowAllPositions] = useState(false);
     const [showAllOrders, setShowAllOrders] = useState(false);
+    const [signals, setSignals] = useState<any[]>([]);
 
     const toNum = (v: any) => {
         const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
@@ -51,7 +53,8 @@ const AgentArena = () => {
                     time: new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
                     agent: l.agent_name,
                     type: l.log_type,
-                    message: l.message
+                    message: l.message,
+                    reasoning: l.reasoning
                 })));
 
                 // Set initial load based on latest activity
@@ -79,7 +82,8 @@ const AgentArena = () => {
                     time: new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
                     agent: l.agent_name,
                     type: l.log_type,
-                    message: l.message
+                    message: l.message,
+                    reasoning: l.reasoning
                 }, ...prev].slice(0, 30));
 
                 // Drive Neural Load Bar from actual activity
@@ -140,6 +144,29 @@ const AgentArena = () => {
         return () => { mounted = false; clearInterval(iv); };
     }, []);
 
+    useEffect(() => {
+        let active = true;
+        const fetchSignals = async () => {
+            try {
+                const { data } = await supabase
+                    .from("signals")
+                    .select("symbol, strength, signal_type, metadata, expires_at, acted_on")
+                    .eq("acted_on", false)
+                    .gte("expires_at", new Date().toISOString())
+                    .order("strength", { ascending: false })
+                    .limit(8);
+                if (!active) return;
+                setSignals(data || []);
+            } catch {
+                if (!active) return;
+                setSignals([]);
+            }
+        };
+        fetchSignals();
+        const iv = setInterval(fetchSignals, 60000);
+        return () => { active = false; clearInterval(iv); };
+    }, []);
+
     const alpacaReady = Boolean(syncStatus.lastSynced) || alpacaAccount !== null || marketClock !== null;
     const account = alpacaReady ? alpacaAccount : portfolio;
     const positions = alpacaReady ? alpacaPositions : (portfolio?.positions || []);
@@ -163,6 +190,29 @@ const AgentArena = () => {
         return tb - ta;
     });
     const displayOrders = showAllOrders ? sortedOrders : sortedOrders.slice(0, 10);
+
+    const topSignals = (signals || []).slice(0, 5);
+    const recentDecision = logs.find((l) => l.type === "decision" && l.reasoning);
+    const recentThought = logs.find((l) => l.type === "learning" && l.reasoning);
+    const investingSymbols = (positions || []).slice(0, 6).map((p: any) => p.symbol);
+    const isInvesting = investingSymbols.length > 0;
+    const investingSummary = isInvesting
+        ? (positions || []).slice(0, 6).map((p: any) => `${p.symbol} (${(p.side || "long").toUpperCase()} ${p.qty})`).join(", ")
+        : "";
+    const watchingSummary = topSignals.length > 0
+        ? topSignals.map((s: any) => `${s.symbol} ${String(s.signal_type || "signal").toUpperCase()} (${Number(s.strength || 0).toFixed(2)})`).join(", ")
+        : "No high-strength signals yet.";
+    const marketLine = marketClock
+        ? `${marketClock.is_open ? "Market OPEN" : "Market CLOSED"} • Next ${marketClock.is_open ? "close" : "open"}: ${new Date(marketClock.is_open ? marketClock.next_close : marketClock.next_open).toLocaleString()}`
+        : "Market clock unavailable";
+
+    const roadmapLines = [
+        "Scan 200+ symbols plus news feeds for high-strength signals and clean liquidity.",
+        "Wait for conviction (strength ≥ 0.8) and respect 30m cooldown + daily cap (5).",
+        "Size entries ≤ 2% equity and keep a 25% cash buffer.",
+        "If market is closed, queue limit orders for the next open; avoid chasing.",
+        "If daily P/L < -1% or drawdown ≥ 3%, switch to low-risk ETF recovery mode.",
+    ];
 
     return (
         <div className="min-h-screen bg-background overflow-x-hidden pt-24 pb-12">
@@ -381,6 +431,54 @@ const AgentArena = () => {
                     </div>
                 </div>
 
+                <div className="glass-card p-6 mb-8 border border-primary/10 bg-black/30">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                        <div className="flex items-center gap-3">
+                            <Eye className="text-primary w-5 h-5" />
+                            <h3 className="font-display font-semibold text-foreground tracking-wide">Strategic Notes</h3>
+                        </div>
+                        <div className="text-xs text-muted-foreground font-mono">{marketLine}</div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                        <div className="space-y-3">
+                            <div>
+                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                                    {isInvesting ? "Investing In" : "Not Actively Investing"}
+                                </div>
+                                <div className="text-foreground/90">
+                                    {isInvesting ? investingSummary : `Watching: ${watchingSummary}`}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Why</div>
+                                <div className="text-foreground/90">
+                                    {recentDecision?.reasoning
+                                        ? recentDecision.reasoning
+                                        : isInvesting
+                                            ? "Positions are sized conservatively and held while waiting for a stronger catalyst or a clean momentum continuation."
+                                            : "No trades until signals show strong strength, liquidity, and risk-adjusted edge."}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Thought Process</div>
+                                <div className="text-foreground/90 whitespace-pre-line">
+                                    {recentThought?.reasoning
+                                        ? recentThought.reasoning.split(" | ").join("\n")
+                                        : "Prioritize high-conviction entries, avoid overtrading, and preserve capital during low-signal regimes."}
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Profit Roadmap</div>
+                            <div className="space-y-2">
+                                {roadmapLines.map((line) => (
+                                    <div key={line} className="text-foreground/90">• {line}</div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Live Internal Monologue Matrix */}
                 <div className="glass-card p-0 overflow-hidden border border-primary/10">
                     <div className="px-6 py-4 border-b border-border/30 flex items-center justify-between bg-black/40">
@@ -407,12 +505,19 @@ const AgentArena = () => {
                                 }}>
                                     {log.agent}
                                 </span>
-                                <span className="text-foreground/90 break-words group-hover:text-white transition-colors">
-                                    {log.type === 'error' && <span className="text-destructive mr-2">[ERR]</span>}
-                                    {log.type === 'decision' && <span className="text-primary mr-2">[DEC]</span>}
-                                    {log.type === 'learning' && <span className="text-accent mr-2">[LRN]</span>}
-                                    {log.message}
-                                </span>
+                                <div className="text-foreground/90 break-words group-hover:text-white transition-colors">
+                                    <div className="flex items-center gap-2">
+                                        {log.type === 'error' && <span className="text-destructive">[ERR]</span>}
+                                        {log.type === 'decision' && <span className="text-primary">[DEC]</span>}
+                                        {log.type === 'learning' && <span className="text-accent">[LRN]</span>}
+                                        <span>{log.message}</span>
+                                    </div>
+                                    {log.reasoning && (
+                                        <div className="mt-1 text-xs text-muted-foreground whitespace-pre-line">
+                                            {String(log.reasoning).split(" | ").join("\n")}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>

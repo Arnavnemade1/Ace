@@ -183,4 +183,46 @@
     animation: shake 0.5s cubic-bezier(.36, .07, .19, .97) both;
     animation-iteration-count: infinite;
   }
+
+  @keyframes card-slice-left {
+    0% {
+      transform: translateX(-140%) rotate(12deg);
+      opacity: 0;
+    }
+    15% {
+      opacity: 0.7;
+    }
+    60% {
+      opacity: 0.2;
+    }
+    100% {
+      transform: translateX(140%) rotate(12deg);
+      opacity: 0;
+    }
+  }
+
+  @keyframes card-slice-right {
+    0% {
+      transform: translateX(140%) rotate(-12deg);
+      opacity: 0;
+    }
+    15% {
+      opacity: 0.7;
+    }
+    60% {
+      opacity: 0.2;
+    }
+    100% {
+      transform: translateX(-140%) rotate(-12deg);
+      opacity: 0;
+    }
+  }
+
+  .animate-card-slice-left {
+    animation: card-slice-left 6s linear infinite;
+  }
+
+  .animate-card-slice-right {
+    animation: card-slice-right 7s linear infinite;
+  }
 }

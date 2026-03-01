@@ -88,6 +88,10 @@ const HeroSection = () => {
               >
                 <div className="w-40 h-56 bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[20px] shadow-2xl relative overflow-hidden flex flex-col items-center justify-center group-hover:border-white/20 transition-colors">
                   <div className="absolute inset-0 bg-gradient-to-br from-[#8b5cf6]/10 via-transparent to-[#00ff41]/5 opacity-50" />
+                  <div className="absolute inset-0 pointer-events-none">
+                    <div className="absolute -left-1/2 top-[12%] w-[200%] h-5 bg-gradient-to-r from-transparent via-[#8b5cf6]/70 to-transparent blur-md animate-card-slice-left" />
+                    <div className="absolute -left-1/2 top-[58%] w-[200%] h-3 bg-gradient-to-r from-transparent via-white/30 to-transparent blur-sm animate-card-slice-left" style={{ animationDelay: "1.4s" }} />
+                  </div>
                   <div className="absolute top-4 left-4 flex flex-col items-center font-display font-black text-xl text-white/40">
                     A
                     <div className="w-1.5 h-1.5 rotate-45 bg-[#8b5cf6]/40 mt-1" />
@@ -113,6 +117,10 @@ const HeroSection = () => {
               >
                 <div className="w-40 h-56 bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[20px] shadow-2xl relative overflow-hidden flex flex-col items-center justify-center group-hover:border-white/20 transition-colors">
                   <div className="absolute inset-0 bg-gradient-to-bl from-[#00ff41]/10 via-transparent to-[#8b5cf6]/5 opacity-50" />
+                  <div className="absolute inset-0 pointer-events-none">
+                    <div className="absolute -left-1/2 top-[15%] w-[200%] h-5 bg-gradient-to-r from-transparent via-[#00ff41]/70 to-transparent blur-md animate-card-slice-right" />
+                    <div className="absolute -left-1/2 top-[62%] w-[200%] h-3 bg-gradient-to-r from-transparent via-white/30 to-transparent blur-sm animate-card-slice-right" style={{ animationDelay: "1.8s" }} />
+                  </div>
                   <div className="absolute top-4 left-4 flex flex-col items-center font-display font-black text-xl text-white/40">
                     A
                     <div className="w-1.5 h-1.5 rotate-45 bg-[#00ff41]/40 mt-1" />
