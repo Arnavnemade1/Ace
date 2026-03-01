@@ -131,6 +131,65 @@ serve(async (req) => {
     const includeDeepThoughts = nowNY.getMinutes() % 30 === 0;
     let journalSummary = "";
     if (includeDeepThoughts) {
+      const { data: portfolio } = await supabase
+        .from("portfolio_state")
+        .select("total_value, cash, daily_pnl, max_drawdown, positions, updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const positions = Array.isArray(portfolio?.positions) ? portfolio?.positions : [];
+      const topPositions = positions
+        .slice(0, 5)
+        .map((p: any) => `${p.symbol} (${p.side || "long"} ${p.qty})`)
+        .join(", ");
+
+      const { data: watchSignals } = await supabase
+        .from("signals")
+        .select("symbol, strength, signal_type, expires_at, acted_on")
+        .eq("acted_on", false)
+        .gte("expires_at", new Date().toISOString())
+        .order("strength", { ascending: false })
+        .limit(6);
+
+      const watchList = (watchSignals || [])
+        .map((s: any) => `${s.symbol} ${String(s.signal_type || "signal").toUpperCase()} (${Number(s.strength || 0).toFixed(2)})`)
+        .join(", ");
+
+      const { data: lastDecision } = await supabase
+        .from("agent_logs")
+        .select("reasoning")
+        .eq("agent_name", "Strategy Engine")
+        .eq("log_type", "decision")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const { data: lastThought } = await supabase
+        .from("agent_logs")
+        .select("reasoning")
+        .eq("agent_name", "Strategy Engine")
+        .eq("log_type", "learning")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const whyLine = lastDecision?.reasoning
+        ? `**Why:** ${String(lastDecision.reasoning).slice(0, 420)}`
+        : "Why: Waiting for higher-conviction signals with clean liquidity.";
+
+      const thoughtLine = lastThought?.reasoning
+        ? `**Thought Process:** ${String(lastThought.reasoning).slice(0, 420)}`
+        : "**Thought Process:** Preserve capital, avoid overtrading, and wait for high-strength alignment.";
+
+      const roadmap = [
+        "Roadmap: scan broad market + news for high-strength signals.",
+        "Wait for conviction ≥ 0.8 and respect cooldown + daily cap.",
+        "Size entries ≤ 2% equity with 25% cash buffer.",
+        "If market closed, queue GTC limits for open.",
+        "If P/L < -1% or drawdown ≥ 3%, switch to low-risk ETFs.",
+      ].join(" ");
+
       const { data: journals } = await supabase
         .from("agent_logs")
         .select("agent_name, reasoning, created_at")
@@ -142,6 +201,24 @@ serve(async (req) => {
           .map((j: any) => `• ${j.agent_name}: ${String(j.reasoning || "").slice(0, 220)}`)
           .join("\n");
       }
+
+      const portfolioLine = portfolio
+        ? `**Portfolio:** $${Number(portfolio.total_value || 0).toFixed(2)} | Cash $${Number(portfolio.cash || 0).toFixed(2)} | Daily PnL $${Number(portfolio.daily_pnl || 0).toFixed(2)} | Max DD ${(Number(portfolio.max_drawdown || 0) * 100).toFixed(2)}%`
+        : "**Portfolio:** unavailable";
+
+      const investLine = positions.length > 0
+        ? `**Investing:** ${topPositions}`
+        : `**Not Investing:** Watching ${watchList || "no strong signals yet"}`;
+
+      journalSummary = [
+        portfolioLine,
+        investLine,
+        whyLine,
+        thoughtLine,
+        `**${roadmap}**`,
+        "",
+        journalSummary ? "**Agent Journals**\n" + journalSummary : "",
+      ].filter(Boolean).join("\n");
     }
 
     const summaryLines = results.map((r) => {

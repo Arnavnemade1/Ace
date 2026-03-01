@@ -75,6 +75,7 @@ export async function startDiscordControl() {
                 at: new Date().toISOString(),
             };
 
+            const summary = `Strategy: ${nextConfig.strategy_bias || 'balanced'} | Risk: ${nextConfig.risk_profile || 'standard'} | Trading: ${nextConfig.trading_enabled === false ? 'paused' : 'enabled'}`;
             const { error } = await supabase
                 .from('agent_state')
                 .update({ config: nextConfig, updated_at: new Date().toISOString() })
@@ -89,10 +90,10 @@ export async function startDiscordControl() {
                 'Orchestrator',
                 'learning',
                 'Discord directive applied',
-                `Keywords: ${keywords.join(', ')} | Strategy: ${nextConfig.strategy_bias || 'balanced'} | Risk: ${nextConfig.risk_profile || 'standard'} | Trading: ${nextConfig.trading_enabled === false ? 'paused' : 'enabled'}`
+                `Keywords: ${keywords.join(', ')} | ${summary}`
             );
 
-            await message.reply(`Directive applied: ${keywords.join(' ')}.`);
+            await message.reply(`Directive applied: ${keywords.join(' ')}. ${summary}`);
         } catch (e) {
             console.error('[DiscordControl] Failed to process directive:', e);
         }
