@@ -84,6 +84,7 @@ serve(async (req) => {
     const strategyBias = String(directive.strategy_bias || "balanced");
     const riskProfile = String(directive.risk_profile || "standard");
     const tradingEnabled = directive.trading_enabled !== false;
+    const minMinutesBetweenTrades = strategyBias === "aggressive" ? 10 : strategyBias === "conservative" ? 60 : MIN_MINUTES_BETWEEN_TRADES;
 
     if (!tradingEnabled) {
       await supabase.from("agent_logs").insert({
@@ -106,11 +107,11 @@ serve(async (req) => {
       .maybeSingle();
     if (lastTrade?.created_at) {
       const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
-      if (ageMs < MIN_MINUTES_BETWEEN_TRADES * 60 * 1000) {
+      if (ageMs < minMinutesBetweenTrades * 60 * 1000) {
         await supabase.from("agent_logs").insert({
           agent_name: "Execution Agent",
           log_type: "info",
-          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago). Skipping execution.`,
+          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago, min ${minMinutesBetweenTrades}m). Skipping execution.`,
         });
         return new Response(JSON.stringify({ success: true, message: "Cooldown active" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -54,6 +54,8 @@ serve(async (req) => {
     const riskProfile = String(directive.risk_profile || "standard");
     const tradingEnabled = directive.trading_enabled !== false;
 
+    const minMinutesBetweenTrades = strategyBias === "aggressive" ? 10 : strategyBias === "conservative" ? 60 : MIN_MINUTES_BETWEEN_TRADES;
+
     if (!tradingEnabled) {
       await supabase.from("agent_logs").insert({
         agent_name: "Strategy Engine",
@@ -78,11 +80,11 @@ serve(async (req) => {
       .maybeSingle();
     if (lastTrade?.created_at) {
       const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
-      if (ageMs < MIN_MINUTES_BETWEEN_TRADES * 60 * 1000) {
+      if (ageMs < minMinutesBetweenTrades * 60 * 1000) {
         await supabase.from("agent_logs").insert({
           agent_name: "Strategy Engine",
           log_type: "info",
-          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago). No new trades recommended.`,
+          message: `Cooldown active (${Math.round(ageMs / 60000)}m ago, min ${minMinutesBetweenTrades}m). No new trades recommended.`,
         });
         return new Response(JSON.stringify({ success: true, decisions: [] }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -307,9 +309,49 @@ IMPORTANT RULES:
       return true;
     });
 
-    // Mark signals as acted on
-    const signalIds = signals.map((s) => s.id);
-    await supabase.from("signals").update({ acted_on: true }).in("id", signalIds);
+    // Deterministic fallback if LLM returns no trades and strong signals exist
+    if (decisions.length === 0) {
+      const ordered = [...signals].sort((a, b) => Number(b.strength || 0) - Number(a.strength || 0));
+      for (const s of ordered) {
+        const strength = Number(s.strength || 0);
+        if (strength < minStrength) continue;
+        if (recentlyTradedSymbols.has(s.symbol)) continue;
+        if (s.signal_type === "SELL" && !heldSymbols.has(s.symbol)) continue;
+        if (s.signal_type === "BUY" && heldSymbols.has(s.symbol)) continue;
+        if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(s.symbol)) continue;
+        if (lossRecoveryMode && strength < minStrengthRecovery) continue;
+        const snap = snapshots[s.symbol];
+        const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
+        if (!price) continue;
+        const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
+        const qty = Math.max(1, Math.min(maxQty, 1));
+        decisions = [{
+          symbol: s.symbol,
+          side: s.signal_type === "SELL" ? "SELL" : "BUY",
+          qty,
+          strategy: "Deterministic Fallback",
+          reasoning: s.metadata?.reasoning || s.metadata?.analysis || s.reasoning || "Fallback trade based on top-ranked signal strength.",
+        }];
+        await supabase.from("agent_logs").insert({
+          agent_name: "Strategy Engine",
+          log_type: "decision",
+          message: `Fallback trade selected: ${decisions[0].side} ${decisions[0].symbol} (strength ${strength.toFixed(2)})`,
+          reasoning: decisions[0].reasoning,
+        });
+        break;
+      }
+    }
+
+    // Mark signals as acted on only for decisions
+    if (decisions.length > 0) {
+      const actedIds = decisions
+        .map((d) => signals.find((s) => s.symbol === d.symbol && String(s.signal_type).toUpperCase() === d.side))
+        .filter(Boolean)
+        .map((s: any) => s.id);
+      if (actedIds.length > 0) {
+        await supabase.from("signals").update({ acted_on: true }).in("id", actedIds);
+      }
+    }
 
     // Store decisions as pending trades
     for (const decision of decisions) {
