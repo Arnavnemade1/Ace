@@ -43,6 +43,33 @@ serve(async (req) => {
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Strategy Engine");
 
+    const { data: directiveState } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Orchestrator")
+      .maybeSingle();
+
+    const directive = directiveState?.config || {};
+    const strategyBias = String(directive.strategy_bias || "balanced");
+    const riskProfile = String(directive.risk_profile || "standard");
+    const tradingEnabled = directive.trading_enabled !== false;
+
+    if (!tradingEnabled) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Strategy Engine",
+        log_type: "info",
+        message: "Trading paused via Discord directive. No new recommendations.",
+        reasoning: `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`,
+      });
+      return new Response(JSON.stringify({ success: true, decisions: [] }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const minStrength = strategyBias === "aggressive" ? 0.75 : strategyBias === "conservative" ? 0.9 : 0.8;
+    const minStrengthRecovery = Math.max(minStrength, 0.85);
+    const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
+
     const { data: lastTrade } = await supabase
       .from("trades")
       .select("created_at")
@@ -165,10 +192,13 @@ serve(async (req) => {
       ? dailyPnl / Number(account.last_equity || 1)
       : (portfolioValue ? dailyPnl / portfolioValue : 0);
     const maxDrawdown = Number(portfolio?.max_drawdown || 0);
-    const lossRecoveryMode = dailyPnlPct <= LOSS_RECOVERY_PNL_PCT || maxDrawdown >= LOSS_RECOVERY_MAX_DRAWDOWN;
-    const effectiveMaxAllocation = lossRecoveryMode ? portfolioValue * 0.01 : maxAllocation;
+    const forceLowRisk = riskProfile === "minimal";
+    const lossRecoveryMode = forceLowRisk || dailyPnlPct <= LOSS_RECOVERY_PNL_PCT || maxDrawdown >= LOSS_RECOVERY_MAX_DRAWDOWN;
+    const effectiveMaxAllocation = lossRecoveryMode
+      ? portfolioValue * 0.01
+      : Math.min(portfolioValue * 0.03, maxAllocation * allocationMultiplier);
 
-    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}, Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`;
+    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}, Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%), Directive: ${strategyBias}/${riskProfile}`;
 
     const tradeHistory = recentTrades?.map((t) =>
       `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
@@ -194,12 +224,13 @@ serve(async (req) => {
 IMPORTANT RULES:
 - Be selective and avoid overtrading. If signals are weak, return no trades.
 - Max 1 trade per cycle.
-- Prefer signals with strength >= 0.8.
+- Prefer signals with strength >= ${minStrength}.
 - Do NOT recommend new BUYs if cash buffer is below ${CASH_BUFFER_PCT * 100}% of equity.
 - Do NOT recommend trades if buying power is below $${MIN_BUYING_POWER}.
 - Consider existing positions to avoid over-concentration.
 - Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.
-- LOSS RECOVERY MODE: if active, only consider low-risk symbols (${Array.from(LOW_RISK_SYMBOLS).join(", ")}) and size at 1% of equity.`,
+- LOSS RECOVERY MODE: if active, only consider low-risk symbols (${Array.from(LOW_RISK_SYMBOLS).join(", ")}) and size at 1% of equity.
+- DISCORD DIRECTIVE: strategy_bias=${strategyBias}, risk_profile=${riskProfile}. Obey risk_profile; if minimal, restrict to low-risk symbols and reduce size.`,
           },
           {
             role: "user",
@@ -256,7 +287,7 @@ IMPORTANT RULES:
     decisions = decisions.filter((d) => {
       if (d.side !== "BUY") return true;
       const strength = signalStrengthBySymbol.get(d.symbol) || 0;
-      if (strength < 0.8) return false;
+      if (strength < minStrength) return false;
       const snap = snapshots[d.symbol];
       const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
       if (!price) return false;
@@ -266,7 +297,7 @@ IMPORTANT RULES:
       if (recentlyTradedSymbols.has(d.symbol)) return false;
       if (currentPositions.length >= MAX_OPEN_POSITIONS) return false;
       if (lossRecoveryMode && !LOW_RISK_SYMBOLS.has(d.symbol)) return false;
-      if (lossRecoveryMode && strength < 0.85) return false;
+      if (lossRecoveryMode && strength < minStrengthRecovery) return false;
       const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
       d.qty = Math.min(d.qty, maxQty);
       return d.qty >= 1;
@@ -309,6 +340,7 @@ IMPORTANT RULES:
       message: "Journal — Strategy Engine cycle reflection",
       reasoning: [
         `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Directive: ${strategyBias}/${riskProfile}`,
         `Market: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"}`,
         `Signals reviewed: ${signals.length}, Trades recommended: ${decisions.length}`,
         `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)} | Buying power: $${buyingPower.toFixed(2)}`,

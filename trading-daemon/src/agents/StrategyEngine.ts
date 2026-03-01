@@ -1,4 +1,4 @@
-import { logAgentAction, supabase } from '../supabase';
+import { getDirectiveConfig, logAgentAction, supabase } from '../supabase';
 import { alpaca } from '../alpaca';
 import { BrainAgent, BrainContext } from './BrainAgent';
 
@@ -40,6 +40,18 @@ export class StrategyEngine {
     async evaluate(symbols: string[], pulse: any, activeSymbols: Set<string>, account: any, positions: any[]) {
         const signals: any[] = [];
         const BATCH_SIZE = 5;
+        const directive = await getDirectiveConfig();
+        const strategyBias = String(directive.strategy_bias || 'balanced');
+        const riskProfile = String(directive.risk_profile || 'standard');
+        const tradingEnabled = directive.trading_enabled !== false;
+
+        if (!tradingEnabled) {
+            await logAgentAction('Strategy Engine', 'info', 'Trading paused via Discord directive. Skipping evaluations.',
+                `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`);
+            return [];
+        }
+
+        const minConviction = strategyBias === 'aggressive' ? 0.8 : strategyBias === 'conservative' ? 0.9 : 0.85;
 
         for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
             const batch = symbols.slice(i, i + BATCH_SIZE);
@@ -78,7 +90,7 @@ export class StrategyEngine {
 
                     const decision = await this.brain.synthesize(context);
 
-                    if (decision.action !== 'HOLD' && decision.conviction > 0.85) {
+                    if (decision.action !== 'HOLD' && decision.conviction >= minConviction) {
                         const signal = {
                             symbol,
                             signal_type: decision.action,

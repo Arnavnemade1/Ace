@@ -75,6 +75,28 @@ serve(async (req) => {
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Execution Agent");
 
+    const { data: directiveState } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Orchestrator")
+      .maybeSingle();
+    const directive = directiveState?.config || {};
+    const strategyBias = String(directive.strategy_bias || "balanced");
+    const riskProfile = String(directive.risk_profile || "standard");
+    const tradingEnabled = directive.trading_enabled !== false;
+
+    if (!tradingEnabled) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Execution Agent",
+        log_type: "info",
+        message: "Trading paused via Discord directive. Skipping execution.",
+        reasoning: `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`,
+      });
+      return new Response(JSON.stringify({ success: true, message: "Trading paused by directive" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Cooldown check
     const { data: lastTrade } = await supabase
       .from("trades")
@@ -162,8 +184,10 @@ serve(async (req) => {
     const minCashBuffer = equity * CASH_BUFFER_PCT;
     const dailyPnl = account?.last_equity ? (parseFloat(account.equity) - parseFloat(account.last_equity)) : 0;
     const dailyPnlPct = account?.last_equity ? dailyPnl / parseFloat(account.last_equity) : 0;
-    const lossRecoveryMode = dailyPnlPct <= LOSS_RECOVERY_PNL_PCT;
-    const maxAllocation = lossRecoveryMode ? equity * 0.01 : equity * MAX_ALLOCATION_PCT;
+    const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
+    const forceLowRisk = riskProfile === "minimal";
+    const lossRecoveryMode = forceLowRisk || dailyPnlPct <= LOSS_RECOVERY_PNL_PCT;
+    const maxAllocation = lossRecoveryMode ? equity * 0.01 : Math.min(equity * 0.03, equity * MAX_ALLOCATION_PCT * allocationMultiplier);
     const positionSymbols = new Set(Array.isArray(positions) ? positions.map((p: any) => p.symbol) : []);
     const openOrderSymbols = new Set(Array.isArray(openOrders) ? openOrders.map((o: any) => o.symbol) : []);
 
@@ -173,6 +197,7 @@ serve(async (req) => {
       message: "Journal — Execution posture",
       reasoning: [
         `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
+        `Directive: ${strategyBias}/${riskProfile}`,
         `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
         `Cash buffer: $${cash.toFixed(2)} / $${minCashBuffer.toFixed(2)}`,
       ].join(" | "),

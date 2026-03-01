@@ -1,4 +1,4 @@
-import { logAgentAction, supabase } from '../supabase';
+import { getDirectiveConfig, logAgentAction, supabase } from '../supabase';
 import { alpaca } from '../alpaca';
 import { DiscordDispatcher } from './DiscordDispatcher';
 
@@ -14,6 +14,7 @@ export class RiskController {
 
     // [x] Phase 32: Symbol Fatigue & Manual Blacklist
     private SYMBOL_BLACKLIST = new Set(['HOOD', 'SOFI', 'ABBV']);
+    private LOW_RISK_SYMBOLS = new Set(['SPY', 'QQQ', 'VTI', 'IWM', 'DIA', 'TLT', 'SHY', 'USFR']);
 
     /** Returns true if NYSE regular trading hours (9:30-16:00 ET, weekdays) */
     isMarketOpen(): boolean {
@@ -49,6 +50,23 @@ export class RiskController {
 
         if (signals.length === 0) return { executed, queued };
 
+        const directive = await getDirectiveConfig();
+        const strategyBias = String(directive.strategy_bias || 'balanced');
+        const riskProfile = String(directive.risk_profile || 'standard');
+        const tradingEnabled = directive.trading_enabled !== false;
+
+        if (!tradingEnabled) {
+            await logAgentAction('Risk Controller', 'info', 'Trading paused via Discord directive. Skipping execution.',
+                `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`);
+            return { executed, queued };
+        }
+
+        const strengthThreshold = strategyBias === 'aggressive' ? 0.65 : strategyBias === 'conservative' ? 0.8 : this.strengthThreshold;
+        const buyStrengthThreshold = strategyBias === 'aggressive' ? 0.75 : strategyBias === 'conservative' ? 0.9 : this.buyStrengthThreshold;
+        const maxAllocationPct = riskProfile === 'minimal'
+            ? 0.01
+            : (strategyBias === 'aggressive' ? Math.min(this.maxAllocationPct * 1.15, 0.03) : strategyBias === 'conservative' ? 0.015 : this.maxAllocationPct);
+
         // Global cooldown: don't trade too frequently
         const { data: lastTrade } = await supabase
             .from('trades')
@@ -73,7 +91,7 @@ export class RiskController {
         if (!isHealthy) return { executed, queued };
 
         // 1. Filter to strong enough signals only
-        const viable = signals.filter(s => s.strength >= this.strengthThreshold);
+        const viable = signals.filter(s => s.strength >= strengthThreshold);
 
         // 2. Ironclad Position Guard (Blocks duplicates, orders, and recent pushes)
         const posSymbols = new Set(currentPositions.map(p => p.symbol));
@@ -95,6 +113,10 @@ export class RiskController {
             }
 
             if (s.signal_type === 'BUY') {
+                if (riskProfile === 'minimal' && !this.LOW_RISK_SYMBOLS.has(s.symbol)) {
+                    console.log(`[Risk Guard] Minimal risk mode: blocking ${s.symbol}.`);
+                    continue;
+                }
                 // Persistent check: 24h Supabase lookup + Local cache + Current holdings
                 const tradedRecently = await this.hasTradedRecently(s.symbol, 'BUY');
                 const held = posSymbols.has(s.symbol) || orderSymbols.has(s.symbol) || this.recentlyPushed.has(s.symbol) || tradedRecently;
@@ -144,7 +166,7 @@ export class RiskController {
         const buyingPower = parseFloat(account.buying_power);
         const cash = parseFloat(account.cash ?? account.buying_power ?? "0");
         const minCashBuffer = equity * this.cashBufferPct;
-        const maxPerTrade = Math.min(equity * this.maxAllocationPct, buyingPower * 0.25, 5000); // 2% equity, 25% BP, or $5000
+        const maxPerTrade = Math.min(equity * maxAllocationPct, buyingPower * 0.25, 5000); // allocation, 25% BP, or $5000
 
         let executedThisCycle = 0;
         for (const signal of finalViable) {
@@ -164,8 +186,8 @@ export class RiskController {
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
 
             if (side === 'buy') {
-                if (signal.strength < this.buyStrengthThreshold) {
-                    await logAgentAction('Risk Controller', 'info', `Skipping BUY ${signal.symbol}: strength ${signal.strength} below ${this.buyStrengthThreshold}.`);
+                if (signal.strength < buyStrengthThreshold) {
+                    await logAgentAction('Risk Controller', 'info', `Skipping BUY ${signal.symbol}: strength ${signal.strength} below ${buyStrengthThreshold}.`);
                     continue;
                 }
                 if (cash < minCashBuffer) {

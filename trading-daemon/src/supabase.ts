@@ -45,3 +45,16 @@ export async function logAgentAction(agent: string, type: 'info' | 'decision' | 
         console.error(`[${agent}] Failed to log to Supabase:`, err);
     }
 }
+
+export async function getDirectiveConfig(): Promise<any> {
+    try {
+        const { data } = await supabase
+            .from('agent_state')
+            .select('config')
+            .eq('agent_name', 'Orchestrator')
+            .maybeSingle();
+        return data?.config || {};
+    } catch {
+        return {};
+    }
+}
