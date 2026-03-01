@@ -290,12 +290,57 @@ const Analytics = () => {
     const [headlines, setHeadlines] = useState<string[]>([
         "ACE_OS FEEDS ONLINE — OMNI-SCANNER ACTIVE",
         "MONITORING: AAPL  MSFT  NVDA  TSLA  SPY  QQQ  BTC  ETH",
-        "HORIZON LOCK: 30-MINUTE SPAN PENALTY — AWAITING CONFIRMATION",
     ]);
     const [rawLogs, setRawLogs] = useState<string[]>([]);
     const [cryptoPrices, setCryptoPrices] = useState<Record<string, number>>({});
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
+
+    /* Fetch real Alpaca prices on load */
+    useEffect(() => {
+        const fetchRealPrices = async () => {
+            try {
+                const { data, error } = await supabase.functions.invoke('market-data', {
+                    body: { symbols: ["SPY", "QQQ"] }
+                });
+                if (error || !data?.snapshots) return;
+
+                const now = new Date();
+                const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const ts = now.getTime();
+
+                // Map Alpaca snapshots to our stream keys
+                const alpacaMap: Record<string, string[]> = {
+                    "SPY": ["ALPHA_VANTAGE", "FINNHUB", "MARKETSTACK"],
+                    "QQQ": ["TWELVEDATA"],
+                };
+
+                setStreams(prev => {
+                    const next = { ...prev };
+                    for (const [symbol, keys] of Object.entries(alpacaMap)) {
+                        const snap = data.snapshots[symbol];
+                        if (!snap?.latestTrade?.p) continue;
+                        const realPrice = snap.latestTrade.p;
+
+                        for (const key of keys) {
+                            // Rebuild baseline around real price
+                            const cfg = STREAMS[key];
+                            const baselined = generateBaseline(realPrice, cfg.vol * 0.3, cfg.trend);
+                            // Override last point with exact real price
+                            baselined[baselined.length - 1] = { time, ts, value: realPrice };
+                            next[key] = baselined;
+                        }
+                    }
+                    return next;
+                });
+
+                setRawLogs(prev => [`${time} ► [ALPACA] Real market data loaded — SPY $${data.snapshots["SPY"]?.latestTrade?.p || "?"}, QQQ $${data.snapshots["QQQ"]?.latestTrade?.p || "?"}`, ...prev]);
+            } catch (e) {
+                console.error("Failed to fetch real prices:", e);
+            }
+        };
+        fetchRealPrices();
+    }, []);
 
     /* 2-second simulation tick */
     useEffect(() => {
@@ -307,11 +352,11 @@ const Analytics = () => {
                     const arr = prev[k];
                     if (!arr.length) return;
                     const last = arr[arr.length - 1].value;
-                    const newVal = parseFloat((last + (Math.random() - 0.49) * cfg.vol + (cfg.trend ?? 0) * 0.01).toFixed(4));
+                    const newVal = parseFloat((last + (Math.random() - 0.49) * cfg.vol * 0.3 + (cfg.trend ?? 0) * 0.01).toFixed(4));
                     const t = new Date();
                     next[k] = [
                         ...arr.slice(-59),
-                        { time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), ts: t.getTime(), value: Math.max(newVal, cfg.base * 0.85) }
+                        { time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), ts: t.getTime(), value: Math.max(newVal, 0) }
                     ];
                 });
                 return next;
@@ -470,8 +515,8 @@ const Analytics = () => {
                                 ))}
                             </div>
                         </div>
-                        <motion.div animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 2, repeat: Infinity }} className="mt-2 text-center text-[10px] text-yellow-500 font-bold tracking-widest uppercase">
-                            ::: HORIZON LOCK ACTIVE — T-{Math.max(1, 30 - Math.floor(tick / 30))} MIN :::
+                        <motion.div animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 2, repeat: Infinity }} className="mt-2 text-center text-[10px] text-primary font-bold tracking-widest uppercase">
+                            ::: NO COOLDOWNS — TRADING FREELY :::
                         </motion.div>
                     </div>
 

@@ -23,3 +23,9 @@ verify_jwt = false
 
 [functions.portfolio-optimizer]
 verify_jwt = false
+
+[functions.market-data]
+verify_jwt = false
+
+[functions.swarm-orchestrator]
+verify_jwt = false
