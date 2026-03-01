@@ -6,7 +6,6 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// --- CONFIG & SECRETS ---
 const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 
 serve(async (req) => {
@@ -16,16 +15,26 @@ serve(async (req) => {
     const LOVABLE_API_KEY = GET_SECRET("LOVABLE_API_KEY");
     const ALPACA_KEY = GET_SECRET("ALPACA_API_KEY");
     const ALPACA_SECRET = GET_SECRET("ALPACA_API_SECRET");
+    const DISCORD_WEBHOOK_URL = GET_SECRET("DISCORD_WEBHOOK_URL");
     const ALPACA_URL = "https://paper-api.alpaca.markets";
+
+    const sendDiscord = async (content: string, embeds?: any[]) => {
+        if (!DISCORD_WEBHOOK_URL) return;
+        try {
+            await fetch(DISCORD_WEBHOOK_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content, embeds }),
+            });
+        } catch (e) { console.error("Discord failed:", e); }
+    };
 
     try {
         console.log("--- ACE_OS Serverless Cycle Triggered ---");
 
-        if (!ALPACA_KEY || !ALPACA_SECRET) {
-            throw new Error("Missing Alpaca API credentials.");
-        }
+        if (!ALPACA_KEY || !ALPACA_SECRET) throw new Error("Missing Alpaca API credentials.");
 
-        // 1. FETCH CONTEXT (News, Portfolio, Technicals)
+        // 1. FETCH CONTEXT
         const [accRes, posRes, ordersRes] = await Promise.all([
             fetch(`${ALPACA_URL}/v2/account`, { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } }),
             fetch(`${ALPACA_URL}/v2/positions`, { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } }),
@@ -34,17 +43,39 @@ serve(async (req) => {
 
         if (!accRes.ok) {
             const errText = await accRes.text();
-            console.error("Alpaca Account Fetch Failed:", errText);
-            throw new Error(`Alpaca Auth/API Error: ${accRes.status}`);
+            throw new Error(`Alpaca Auth/API Error: ${accRes.status} — ${errText}`);
         }
 
         const account = await accRes.json();
         const positions = await posRes.json();
         const openOrders = await ordersRes.json();
+        const currentHoldings = Array.isArray(positions) ? positions.map((p: any) => p.symbol) : [];
 
-        console.log(`Context Fetched. Equity: ${account.equity}`);
+        console.log(`Equity: $${account.equity}, Positions: ${currentHoldings.length}, Cash: $${account.cash}`);
 
-        // 2. OMNI-PULSE: Fetch News
+        // 2. FETCH REAL MARKET DATA for decision-making
+        const watchlist = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "AMZN", "META", "SPY", "QQQ", "AMD"];
+        const snapshotsRes = await fetch(
+            `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${watchlist.join(",")}`,
+            { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } }
+        );
+        let snapshots: Record<string, any> = {};
+        if (snapshotsRes.ok) snapshots = await snapshotsRes.json();
+
+        // Build rich market context
+        const marketContext = watchlist.map(sym => {
+            const snap = snapshots[sym];
+            if (!snap) return `${sym}: NO DATA`;
+            const price = snap.latestTrade?.p || snap.dailyBar?.c || 0;
+            const dayChange = snap.dailyBar ? ((snap.dailyBar.c - snap.dailyBar.o) / snap.dailyBar.o * 100).toFixed(2) : "N/A";
+            const vol = snap.dailyBar?.v || 0;
+            const held = currentHoldings.includes(sym);
+            const posData = Array.isArray(positions) ? positions.find((p: any) => p.symbol === sym) : null;
+            const pnl = posData ? `$${parseFloat(posData.unrealized_pl).toFixed(2)}` : "not held";
+            return `${sym}: $${price} (${dayChange}%), Vol:${vol}, Held:${held}, P&L:${pnl}`;
+        }).join("\n");
+
+        // 3. FETCH NEWS
         const NEWSDATA_KEY = GET_SECRET("NEWSDATA_KEY");
         let newsHeadlines: string[] = [];
         if (NEWSDATA_KEY) {
@@ -52,30 +83,56 @@ serve(async (req) => {
                 const newsRes = await fetch(`https://newsdata.io/api/1/latest?apikey=${NEWSDATA_KEY}&q=finance OR market OR economy&language=en`);
                 if (newsRes.ok) {
                     const newsData = await newsRes.json();
-                    newsHeadlines = (newsData.results || []).slice(0, 10).map((n: any) => n.title);
+                    newsHeadlines = (newsData.results || []).slice(0, 15).map((n: any) => n.title);
                 }
-            } catch (e) {
-                console.error("News fetch failed", e);
-            }
+            } catch (e) { console.error("News fetch failed", e); }
         }
 
-        // 3. BRAIN SYNTHESIS: Call Lovable AI Gateway
-        const currentHoldings = Array.isArray(positions) ? positions.map((p: any) => p.symbol) : [];
-        const watchlist = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "BTC/USD", "ETH/USD"];
-        const symbolToEvaluate = watchlist[Math.floor(Math.random() * watchlist.length)];
-
-        console.log(`Evaluating ${symbolToEvaluate} with Omni-Brain...`);
-
+        // 4. BRAIN SYNTHESIS — aggressive, data-driven, no cooldowns
         if (!LOVABLE_API_KEY) {
-            console.warn("LOVABLE_API_KEY missing. Skipping AI synthesis.");
+            console.warn("LOVABLE_API_KEY missing.");
             return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), { status: 401 });
         }
 
         const brainPrompt = {
             model: "google/gemini-3-flash-preview",
             messages: [
-                { role: "system", content: "You are the ACE_OS Omni-Brain. Review market context and portfolio. Decide: BUY, SELL, or HOLD for the provided symbol. Return JSON with 'action' (BUY/SELL/HOLD) and 'reasoning' (string)." },
-                { role: "user", content: `SYMBOL: ${symbolToEvaluate}\nPortfolio: $${account.equity} equity, $${account.buying_power} cash. Current Holdings: ${currentHoldings.join(", ")}\nNews: ${newsHeadlines.join(" | ")}\n\nDecision? (JSON)` }
+                {
+                    role: "system",
+                    content: `You are the Omni-Brain of ACE_OS, an aggressive autonomous paper trading system. 
+You make REAL trades on Alpaca Paper. Your goal: MAXIMIZE RETURNS through smart, data-driven decisions.
+
+RULES:
+- You CAN and SHOULD open new positions. No artificial cooldowns or waiting periods.
+- Analyze the REAL market data, prices, volumes, and day changes provided.
+- Consider news sentiment when making decisions.
+- Max 15% of equity per position for risk management.
+- You can BUY stocks you don't hold, SELL stocks you do hold, or HOLD.
+- Consider momentum, mean reversion, breakouts, and sector rotation.
+- If a stock is down significantly and fundamentals are strong → consider BUY.
+- If a stock is up big with weakening momentum → consider taking profit (SELL).
+- Be decisive. Paper trading — learn aggressively.
+
+Return JSON: {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, "reasoning": "string", "conviction": 0.0-1.0}
+- For BUY: pick the best opportunity from the watchlist
+- For SELL: pick a position to exit if appropriate  
+- qty should be meaningful (1-10 shares based on price and portfolio size)
+- If multiple opportunities, pick the STRONGEST signal`
+                },
+                {
+                    role: "user",
+                    content: `PORTFOLIO: $${account.equity} equity, $${account.cash} cash, $${account.buying_power} buying power
+POSITIONS: ${currentHoldings.length > 0 ? currentHoldings.join(", ") : "NONE"}
+OPEN ORDERS: ${Array.isArray(openOrders) ? openOrders.length : 0}
+
+REAL-TIME MARKET DATA:
+${marketContext}
+
+NEWS HEADLINES:
+${newsHeadlines.length > 0 ? newsHeadlines.map(h => `• ${h}`).join("\n") : "No recent news"}
+
+Analyze and make your trading decision. Be aggressive but smart.`
+                }
             ],
             response_format: { type: "json_object" }
         };
@@ -97,58 +154,166 @@ serve(async (req) => {
         if (!aiContent) throw new Error("Empty AI response content.");
 
         const decision = JSON.parse(aiContent);
-        console.log(`Omni-Brain Decision for ${symbolToEvaluate}: ${decision.action}`);
+        const symbol = decision.symbol || watchlist[0];
+        const qty = Math.max(1, Math.min(decision.qty || 1, 20));
+        console.log(`Omni-Brain Decision: ${decision.action} ${qty} ${symbol} (conviction: ${decision.conviction})`);
 
-        // 4. RISK & EXECUTION
-        let tradeResult = "Decision: HOLD/REJECT";
-        if (decision.action === "BUY" && !currentHoldings.includes(symbolToEvaluate)) {
+        // 5. EXECUTE TRADE
+        let tradeResult = `Decision: ${decision.action} — ${decision.reasoning}`;
+        let tradeExecuted = false;
+
+        if (decision.action === "BUY" && parseFloat(account.buying_power) > 100) {
             const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
                 method: "POST",
                 headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    symbol: symbolToEvaluate.replace("/", ""),
-                    qty: 1,
+                    symbol: symbol.replace("/", ""),
+                    qty: String(qty),
                     side: "buy",
                     type: "market",
-                    time_in_force: "gtc"
+                    time_in_force: "day"
                 })
             });
             if (orderRes.ok) {
-                tradeResult = `EXECUTED BUY: ${symbolToEvaluate} x1`;
+                const orderData = await orderRes.json();
+                tradeResult = `EXECUTED BUY: ${qty} ${symbol}`;
+                tradeExecuted = true;
+
+                // Wait for fill
+                let fillPrice = 0;
+                for (let i = 0; i < 8; i++) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const checkRes = await fetch(`${ALPACA_URL}/v2/orders/${orderData.id}`, {
+                        headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET },
+                    });
+                    if (checkRes.ok) {
+                        const check = await checkRes.json();
+                        if (check.status === "filled") { fillPrice = parseFloat(check.filled_avg_price); break; }
+                    }
+                }
+
+                // Record trade
+                await supabase.from("trades").insert({
+                    symbol, side: "BUY", qty, price: fillPrice, total_value: fillPrice * qty,
+                    agent: "Omni-Brain", strategy: "AI Synthesis",
+                    reasoning: decision.reasoning, status: "executed",
+                    alpaca_order_id: orderData.id,
+                });
+
+                await sendDiscord("", [{
+                    title: `🟢 BUY EXECUTED — ${symbol}`,
+                    description: `**Qty:** ${qty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Total:** $${(fillPrice * qty).toFixed(2)}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%\n**Reasoning:** ${decision.reasoning}`,
+                    color: 0x00ff41,
+                    footer: { text: "ACE_OS Omni-Brain" },
+                    timestamp: new Date().toISOString(),
+                }]);
             } else {
                 const errText = await orderRes.text();
                 tradeResult = `ORDER FAILED: ${errText}`;
+                await sendDiscord(`❌ BUY ORDER FAILED for ${symbol}: ${errText}`);
             }
+        } else if (decision.action === "SELL" && currentHoldings.includes(symbol)) {
+            const posData = positions.find((p: any) => p.symbol === symbol);
+            const sellQty = Math.min(qty, parseInt(posData?.qty || "0"));
+            if (sellQty > 0) {
+                const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
+                    method: "POST",
+                    headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        symbol: symbol.replace("/", ""),
+                        qty: String(sellQty),
+                        side: "sell",
+                        type: "market",
+                        time_in_force: "day"
+                    })
+                });
+                if (orderRes.ok) {
+                    const orderData = await orderRes.json();
+                    tradeResult = `EXECUTED SELL: ${sellQty} ${symbol}`;
+                    tradeExecuted = true;
+
+                    let fillPrice = 0;
+                    for (let i = 0; i < 8; i++) {
+                        await new Promise(r => setTimeout(r, 2000));
+                        const checkRes = await fetch(`${ALPACA_URL}/v2/orders/${orderData.id}`, {
+                            headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET },
+                        });
+                        if (checkRes.ok) {
+                            const check = await checkRes.json();
+                            if (check.status === "filled") { fillPrice = parseFloat(check.filled_avg_price); break; }
+                        }
+                    }
+
+                    await supabase.from("trades").insert({
+                        symbol, side: "SELL", qty: sellQty, price: fillPrice, total_value: fillPrice * sellQty,
+                        agent: "Omni-Brain", strategy: "AI Synthesis",
+                        reasoning: decision.reasoning, status: "executed",
+                        alpaca_order_id: orderData.id,
+                    });
+
+                    await sendDiscord("", [{
+                        title: `🔴 SELL EXECUTED — ${symbol}`,
+                        description: `**Qty:** ${sellQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Reasoning:** ${decision.reasoning}`,
+                        color: 0xff4444,
+                        footer: { text: "ACE_OS Omni-Brain" },
+                        timestamp: new Date().toISOString(),
+                    }]);
+                } else {
+                    const errText = await orderRes.text();
+                    tradeResult = `SELL FAILED: ${errText}`;
+                }
+            }
+        } else if (decision.action === "HOLD") {
+            await sendDiscord("", [{
+                title: `⏸️ HOLD — ${symbol}`,
+                description: `**Reasoning:** ${decision.reasoning}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%`,
+                color: 0xffaa00,
+                footer: { text: "ACE_OS Omni-Brain" },
+                timestamp: new Date().toISOString(),
+            }]);
         }
 
-        // 5. SYNC BACK TO SUPABASE
-        console.log("Syncing cycle data to Supabase...");
-        await Promise.all([
-            supabase.from("agent_logs").insert({
-                agent_name: "Swarm Orchestrator (Serverless)",
-                log_type: "decision",
-                message: `Omni-Brain Analysis: ${symbolToEvaluate} -> ${decision.action}`,
-                reasoning: decision.reasoning,
-                metadata: { decision, tradeResult, symbol: symbolToEvaluate }
-            }),
-            supabase.from("portfolio_state").upsert({
-                id: '63963cac-3336-44d5-b7b7-913a89beb74f',
-                total_value: parseFloat(account.portfolio_value) || 0,
-                cash: parseFloat(account.cash) || 0,
-                buying_power: parseFloat(account.buying_power) || 0,
-                equity: parseFloat(account.equity) || 0,
-                positions: positions,
-                updated_at: new Date().toISOString()
-            })
-        ]);
+        // 6. SYNC PORTFOLIO TO SUPABASE
+        const freshAccRes = await fetch(`${ALPACA_URL}/v2/account`, { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } });
+        const freshPosRes = await fetch(`${ALPACA_URL}/v2/positions`, { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } });
 
-        return new Response(JSON.stringify({ success: true, symbol: symbolToEvaluate, decision, tradeResult }), {
+        if (freshAccRes.ok) {
+            const freshAcc = await freshAccRes.json();
+            const freshPos = freshPosRes.ok ? await freshPosRes.json() : [];
+
+            await supabase.from("portfolio_state").upsert({
+                id: '63963cac-3336-44d5-b7b7-913a89beb74f',
+                total_value: parseFloat(freshAcc.portfolio_value) || 0,
+                cash: parseFloat(freshAcc.cash) || 0,
+                buying_power: parseFloat(freshAcc.buying_power) || 0,
+                equity: parseFloat(freshAcc.equity) || 0,
+                positions: Array.isArray(freshPos) ? freshPos.map((p: any) => ({
+                    symbol: p.symbol, qty: parseFloat(p.qty), avg_entry: parseFloat(p.avg_entry_price),
+                    current_price: parseFloat(p.current_price), unrealized_pnl: parseFloat(p.unrealized_pl),
+                    unrealized_plpc: parseFloat(p.unrealized_plpc), market_value: parseFloat(p.market_value), side: p.side,
+                })) : [],
+                daily_pnl: parseFloat(freshAcc.equity) - parseFloat(freshAcc.last_equity),
+                updated_at: new Date().toISOString()
+            });
+        }
+
+        await supabase.from("agent_logs").insert({
+            agent_name: "Swarm Orchestrator",
+            log_type: "decision",
+            message: `${decision.action} ${qty} ${symbol} — ${tradeResult}`,
+            reasoning: decision.reasoning,
+            metadata: { decision, tradeResult, symbol, tradeExecuted }
+        });
+
+        return new Response(JSON.stringify({ success: true, symbol, decision, tradeResult }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
 
     } catch (error: unknown) {
         console.error("Cycle Error:", error);
-        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
+        const msg = error instanceof Error ? error.message : "Unknown error";
+        await sendDiscord(`🚨 **ACE_OS ERROR:** ${msg}`);
+        return new Response(JSON.stringify({ error: msg }), {
             status: 500,
             headers: { ...corsHeaders, "Content-Type": "application/json" }
         });

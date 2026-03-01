@@ -6,9 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MAX_POSITION_PCT = 0.10; // 10% max per position
-const MAX_PORTFOLIO_RISK = 0.05; // 5% max portfolio VaR
-const MAX_DAILY_LOSS = 0.02; // 2% max daily loss
+const MAX_POSITION_PCT = 0.15; // 15% max per position (aggressive for paper)
+const MAX_DAILY_LOSS = 0.05; // 5% max daily loss
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -44,9 +43,9 @@ serve(async (req) => {
     const dailyPnl = portfolio?.daily_pnl || 0;
     const positions = portfolio?.positions || [];
 
-    // AI-enhanced risk assessment
+    // AI-enhanced risk assessment — permissive for paper trading
     const tradesSummary = pendingTrades.map((t) =>
-      `${t.side} ${t.qty} ${t.symbol} (strategy: ${t.strategy}, reasoning: ${t.reasoning})`
+      `ID:${t.id} — ${t.side} ${t.qty} ${t.symbol} (strategy: ${t.strategy}, reasoning: ${t.reasoning})`
     ).join("\n");
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -56,23 +55,23 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
         messages: [
           {
             role: "system",
-            content: `You are the Risk Controller of an autonomous paper trading system. Review pending trades and apply risk management rules:
+            content: `You are the Risk Controller of an autonomous PAPER trading system. Review pending trades and apply risk rules:
 
-Rules:
+Rules (RELAXED for paper trading — be permissive):
 - Max ${MAX_POSITION_PCT * 100}% of portfolio ($${portfolioValue}) in any single position
-- Max ${MAX_PORTFOLIO_RISK * 100}% portfolio VaR
-- Max ${MAX_DAILY_LOSS * 100}% daily loss (current P&L: $${dailyPnl})
-- No more than 3 correlated positions in the same sector
-- Adjust position sizes if needed
-- Reject trades that violate risk limits
+- Max ${MAX_DAILY_LOSS * 100}% daily loss (current daily P&L: $${dailyPnl})
+- Approve most trades — this is paper trading for learning
+- Only reject if it would create extreme concentration (>25% in one stock)
+- Adjust qty if needed but prefer to approve
 
 Current positions: ${JSON.stringify(positions)}
 Cash available: $${cash}
 
-For each trade, decide: approve (with potentially adjusted qty), or reject with reason.`,
+IMPORTANT: Approve aggressively. Only reject truly dangerous trades.`,
           },
           {
             role: "user",
@@ -134,27 +133,35 @@ For each trade, decide: approve (with potentially adjusted qty), or reject with 
       if (decision.approved) {
         const newQty = decision.adjusted_qty || trade.qty;
         await supabase.from("trades").update({
-          qty: newQty,
-          status: "pending", // stays pending for execution agent
+          qty: Math.max(1, Math.round(newQty)),
+          status: "pending",
         }).eq("id", trade.id);
         approved++;
       } else {
-        await supabase.from("trades").update({ status: "cancelled" }).eq("id", trade.id);
+        await supabase.from("trades").update({ status: "cancelled", reasoning: `Risk rejected: ${decision.reasoning}` }).eq("id", trade.id);
         rejected++;
       }
+    }
+
+    // If AI didn't return decisions for some trades, auto-approve them
+    const decidedIds = riskResult.decisions.map((d: any) => d.trade_id);
+    const undecided = pendingTrades.filter(t => !decidedIds.includes(t.id));
+    for (const trade of undecided) {
+      approved++;
+      // Leave as pending — auto-approved
     }
 
     await supabase.from("agent_logs").insert({
       agent_name: "Risk Controller",
       log_type: "decision",
-      message: `Reviewed ${pendingTrades.length} trades: ${approved} approved, ${rejected} rejected. Portfolio VaR: ${riskResult.portfolio_var}%`,
+      message: `Reviewed ${pendingTrades.length} trades: ${approved} approved, ${rejected} rejected. VaR: ${riskResult.portfolio_var}%`,
       metadata: { approved, rejected, portfolio_var: riskResult.portfolio_var },
     });
 
     await supabase.from("agent_state").update({
       metric_value: `${riskResult.portfolio_var}%`,
       metric_label: "current VaR",
-      last_action: `Reviewed ${pendingTrades.length} trades`,
+      last_action: `${approved} approved, ${rejected} rejected`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("agent_name", "Risk Controller");

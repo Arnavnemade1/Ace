@@ -15,6 +15,8 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
+    const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Strategy Engine");
@@ -25,8 +27,8 @@ serve(async (req) => {
       .select("*")
       .eq("acted_on", false)
       .gte("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .limit(20);
+      .order("strength", { ascending: false })
+      .limit(30);
 
     // Fetch portfolio state
     const { data: portfolio } = await supabase.from("portfolio_state").select("*").limit(1).single();
@@ -37,6 +39,19 @@ serve(async (req) => {
       .select("*")
       .order("executed_at", { ascending: false })
       .limit(10);
+
+    // Fetch real prices from Alpaca for sizing
+    let snapshots: Record<string, any> = {};
+    if (ALPACA_API_KEY && ALPACA_API_SECRET) {
+      const symbols = [...new Set((signals || []).map(s => s.symbol))];
+      if (symbols.length > 0) {
+        const snapRes = await fetch(
+          `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${symbols.join(",")}`,
+          { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
+        );
+        if (snapRes.ok) snapshots = await snapRes.json();
+      }
+    }
 
     if (!signals || signals.length === 0) {
       await supabase.from("agent_logs").insert({
@@ -49,19 +64,23 @@ serve(async (req) => {
       });
     }
 
-    const signalSummary = signals.map((s) =>
-      `${s.symbol}: ${s.signal_type} (strength: ${s.strength}) - ${s.metadata?.reasoning || "No reasoning"}`
-    ).join("\n");
+    const signalSummary = signals.map((s) => {
+      const snap = snapshots[s.symbol];
+      const price = snap?.latestTrade?.p || "unknown";
+      return `${s.symbol}: ${s.signal_type} (strength: ${s.strength}, price: $${price}) - ${s.metadata?.reasoning || "No reasoning"}`;
+    }).join("\n");
 
-    const portfolioSummary = portfolio
-      ? `Cash: $${portfolio.cash}, Total Value: $${portfolio.total_value}, Positions: ${JSON.stringify(portfolio.positions)}`
-      : "No portfolio data";
+    const portfolioValue = portfolio?.total_value || 100000;
+    const cash = portfolio?.cash || 100000;
+    const currentPositions = portfolio?.positions || [];
+
+    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Positions: ${JSON.stringify(currentPositions)}`;
 
     const tradeHistory = recentTrades?.map((t) =>
-      `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.agent})`
+      `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
     ).join("\n") || "No recent trades";
 
-    // AI decides which signals to act on and how
+    // AI decides which signals to act on — NO COOLDOWNS
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -69,25 +88,26 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
         messages: [
           {
             role: "system",
-            content: `You are the Strategy Engine of an autonomous paper trading system. You run three strategies:
-1. Momentum: Follow strong trends (signal strength > 0.7)
-2. Mean Reversion: Fade overextended moves (look for reversion signals)
+            content: `You are the Strategy Engine of an aggressive autonomous paper trading system. You run three strategies:
+1. Momentum: Follow strong trends (signal strength > 0.6)
+2. Mean Reversion: Fade overextended moves
 3. Volatility Arbitrage: Trade vol spikes
 
-Given signals and portfolio state, decide which trades to recommend. Consider:
-- Position sizing (never more than 10% of portfolio in one trade)
-- Don't double up on existing positions
-- Risk/reward ratio
-- Correlation between positions
-
-Return trade recommendations.`,
+IMPORTANT RULES:
+- NO waiting periods or cooldowns. Trade whenever opportunities exist.
+- Size positions appropriately: use real prices to calculate qty (max 10% of portfolio per trade)
+- It's OK to open NEW positions — be aggressive on paper trading
+- Multiple trades per cycle are fine
+- Consider existing positions to avoid over-concentration
+- Calculate qty based on real prices: qty = floor(allocation / price)`,
           },
           {
             role: "user",
-            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nRecent Trades:\n${tradeHistory}\n\nWhat trades should we execute?`,
+            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. Be aggressive — this is paper trading. Size appropriately using real prices.`,
           },
         ],
         tools: [
@@ -109,7 +129,6 @@ Return trade recommendations.`,
                         qty: { type: "number" },
                         strategy: { type: "string" },
                         reasoning: { type: "string" },
-                        signal_id: { type: "string" },
                       },
                       required: ["symbol", "side", "qty", "strategy", "reasoning"],
                     },
@@ -124,9 +143,7 @@ Return trade recommendations.`,
       }),
     });
 
-    if (!aiResponse.ok) {
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
-    }
+    if (!aiResponse.ok) throw new Error(`AI gateway error: ${aiResponse.status}`);
 
     const aiData = await aiResponse.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
@@ -146,8 +163,8 @@ Return trade recommendations.`,
       await supabase.from("trades").insert({
         symbol: decision.symbol,
         side: decision.side,
-        qty: decision.qty,
-        price: 0, // Will be filled by Execution Agent
+        qty: Math.max(1, Math.round(decision.qty)),
+        price: 0,
         total_value: 0,
         agent: "Strategy Engine",
         strategy: decision.strategy,
@@ -159,7 +176,7 @@ Return trade recommendations.`,
     await supabase.from("agent_logs").insert({
       agent_name: "Strategy Engine",
       log_type: "decision",
-      message: `Processed ${signals.length} signals, recommended ${decisions.length} trades`,
+      message: `Processed ${signals.length} signals → ${decisions.length} trades recommended`,
       reasoning: decisions.map((d) => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; "),
       metadata: { signal_count: signals.length, trade_count: decisions.length },
     });

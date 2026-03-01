@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META"];
+const WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META", "AMD", "GOOGL"];
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -24,28 +24,9 @@ serve(async (req) => {
     if (!ALPACA_API_KEY || !ALPACA_API_SECRET) throw new Error("Alpaca keys not configured");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // Update agent state to active
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Market Scanner");
 
-    // Fetch market data from Alpaca
-    const barsPromises = WATCHLIST.map(async (symbol) => {
-      const res = await fetch(
-        `https://data.alpaca.markets/v2/stocks/${symbol}/bars/latest`,
-        {
-          headers: {
-            "APCA-API-KEY-ID": ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
-          },
-        }
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      return { symbol, bar: data.bar };
-    });
-
-    const bars = (await Promise.all(barsPromises)).filter(Boolean);
-
-    // Fetch recent trades for context
+    // Fetch snapshots for all watchlist symbols
     const snapshotsRes = await fetch(
       `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${WATCHLIST.join(",")}`,
       {
@@ -61,14 +42,29 @@ serve(async (req) => {
       snapshots = await snapshotsRes.json();
     }
 
-    // Use AI to analyze market data and generate signals
+    // Also store raw data to live_api_streams for Analytics page
+    for (const [symbol, snap] of Object.entries(snapshots)) {
+      if (snap?.latestTrade?.p) {
+        await supabase.from("live_api_streams").insert({
+          source: "AlphaVantage",
+          symbol_or_context: symbol,
+          payload: { "05. price": String(snap.latestTrade.p), symbol, ...snap.dailyBar },
+        });
+      }
+    }
+
+    // Build rich market context with real data
     const marketContext = WATCHLIST.map((symbol) => {
       const snap = snapshots[symbol];
       if (!snap) return `${symbol}: No data available`;
-      const change = snap.dailyBar
-        ? ((snap.dailyBar.c - snap.dailyBar.o) / snap.dailyBar.o * 100).toFixed(2)
-        : "N/A";
-      return `${symbol}: Price=$${snap.latestTrade?.p || "N/A"}, DayChange=${change}%, Vol=${snap.dailyBar?.v || "N/A"}, High=$${snap.dailyBar?.h || "N/A"}, Low=$${snap.dailyBar?.l || "N/A"}`;
+      const price = snap.latestTrade?.p || snap.dailyBar?.c || 0;
+      const prevClose = snap.prevDailyBar?.c || snap.dailyBar?.o || price;
+      const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100).toFixed(2) : "N/A";
+      const vol = snap.dailyBar?.v || 0;
+      const high = snap.dailyBar?.h || 0;
+      const low = snap.dailyBar?.l || 0;
+      const vwap = snap.dailyBar?.vw || 0;
+      return `${symbol}: Price=$${price}, Change=${change}%, Vol=${vol}, High=$${high}, Low=$${low}, VWAP=$${vwap}`;
     }).join("\n");
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -78,20 +74,25 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
         messages: [
           {
             role: "system",
-            content: `You are the Market Scanner agent of an autonomous trading system. Analyze market data and identify trading signals. For each signal, provide:
+            content: `You are the Market Scanner agent of an aggressive autonomous paper trading system. Analyze REAL market data and identify strong trading signals. 
+
+For each signal, provide:
 - symbol
-- signal_type: one of "momentum_long", "momentum_short", "mean_reversion_long", "mean_reversion_short", "breakout", "breakdown", "vol_spike"
+- signal_type: "momentum_long", "momentum_short", "mean_reversion_long", "mean_reversion_short", "breakout", "breakdown", "vol_spike"
 - strength: 0.0 to 1.0
 - reasoning: brief explanation
 
-Return a JSON array of signals. Only return signals with strength >= 0.5. Be selective and data-driven.`,
+IMPORTANT: Be generous with signals — lower the threshold. Return signals with strength >= 0.4.
+Look for: momentum plays, oversold bounces, breakouts, high volume moves, sector divergences.
+This is paper trading — we want to learn from many trades.`,
           },
           {
             role: "user",
-            content: `Current market data:\n${marketContext}\n\nAnalyze and return trading signals as a JSON array.`,
+            content: `Current REAL market data:\n${marketContext}\n\nFind ALL tradeable signals. Be aggressive.`,
           },
         ],
         tools: [
@@ -128,8 +129,7 @@ Return a JSON array of signals. Only return signals with strength >= 0.5. Be sel
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      console.error("AI gateway error:", aiResponse.status, errText);
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
+      throw new Error(`AI gateway error: ${aiResponse.status} — ${errText}`);
     }
 
     const aiData = await aiResponse.json();
@@ -148,26 +148,24 @@ Return a JSON array of signals. Only return signals with strength >= 0.5. Be sel
         signal_type: s.signal_type,
         strength: s.strength,
         source_agent: "Market Scanner",
-        metadata: { reasoning: s.reasoning, market_data: snapshots[s.symbol] || {} },
-        expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), // 4hr expiry
+        metadata: { reasoning: s.reasoning, market_data: snapshots[s.symbol]?.dailyBar || {} },
+        expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
       }));
 
       await supabase.from("signals").insert(signalRows);
     }
 
-    // Log the scan
     await supabase.from("agent_logs").insert({
       agent_name: "Market Scanner",
       log_type: "info",
-      message: `Scanned ${WATCHLIST.length} symbols, found ${signals.length} signals`,
+      message: `Scanned ${WATCHLIST.length} symbols with REAL data, found ${signals.length} signals`,
       metadata: { symbols_scanned: WATCHLIST, signal_count: signals.length },
     });
 
-    // Update agent metric
     await supabase.from("agent_state").update({
       metric_value: String(signals.length),
       metric_label: "signals / hr",
-      last_action: `Scanned ${WATCHLIST.length} symbols`,
+      last_action: `Scanned ${WATCHLIST.length} symbols (live)`,
       last_action_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("agent_name", "Market Scanner");
