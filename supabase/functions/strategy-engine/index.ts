@@ -301,14 +301,19 @@ IMPORTANT RULES:
       }
     }
 
-    // Store decisions as pending trades
+    // Store decisions as pending trades (include price estimate so risk can budget)
     for (const decision of decisions) {
+      const qty = Math.max(1, Math.round(decision.qty));
+      // use snapshot price if available, otherwise fall back to 0
+      const snap = snapshots[decision.symbol];
+      const estPrice = snap?.latestTrade?.p || snap?.dailyBar?.c || 0;
+      const totalVal = estPrice > 0 ? estPrice * qty : 0;
       await supabase.from("trades").insert({
         symbol: decision.symbol,
         side: decision.side,
-        qty: Math.max(1, Math.round(decision.qty)),
-        price: 0,
-        total_value: 0,
+        qty,
+        price: estPrice,
+        total_value: totalVal,
         agent: "Strategy Engine",
         strategy: decision.strategy,
         reasoning: decision.reasoning,

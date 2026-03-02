@@ -89,7 +89,7 @@ serve(async (req) => {
       ]);
       results.push(scanResult, sentimentResult);
 
-      if (mode !== "scan_only") {
+      if (mode !== "scan_only" && !overDailyCap) {
         // Phase 2: Strategy
         const strategyResult = await callAgent("strategy-engine");
         results.push(strategyResult);
@@ -129,6 +129,16 @@ serve(async (req) => {
       .eq("status", "executed")
       .gte("created_at", dayStartNY.toISOString());
     const executedCount = executedToday?.length || 0;
+
+    // enforce daily trade cap from constant above
+    const overDailyCap = executedCount >= DAILY_TRADE_CAP;
+    if (overDailyCap) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Orchestrator",
+        log_type: "warning",
+        message: `Daily trade cap (${DAILY_TRADE_CAP}) reached; skipping execution phases.`,
+      });
+    }
 
     const { data: orchestratorState } = await supabase
       .from("agent_state")
