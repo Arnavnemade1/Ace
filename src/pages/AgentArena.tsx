@@ -307,7 +307,7 @@ const AgentArena = () => {
                                 <label className="flex items-center gap-2 text-muted-foreground">
                                     Asset Class
                                     <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={assetClassFilter} onChange={(e) => setAssetClassFilter(e.target.value)}>
-                                        {assetClassOptions.map((opt) => (
+                                        {assetClassOptions.map((opt: string) => (
                                             <option key={opt} value={opt}>{opt === "All" ? "All" : formatAssetClass(opt)}</option>
                                         ))}
                                     </select>
@@ -315,7 +315,7 @@ const AgentArena = () => {
                                 <label className="flex items-center gap-2 text-muted-foreground">
                                     Side
                                     <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={sideFilter} onChange={(e) => setSideFilter(e.target.value)}>
-                                        {sideOptions.map((opt) => (
+                                        {sideOptions.map((opt: string) => (
                                             <option key={opt} value={opt}>{opt === "All" ? "All" : opt.toUpperCase()}</option>
                                         ))}
                                     </select>

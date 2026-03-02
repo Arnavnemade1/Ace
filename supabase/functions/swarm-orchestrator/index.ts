@@ -8,10 +8,6 @@ const corsHeaders = {
 
 const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
-const MIN_MINUTES_BETWEEN_TRADES = 30;
-const MIN_BUYING_POWER = 1000;
-const CASH_BUFFER_PCT = 0.25;
-const MAX_ALLOCATION_PCT = 0.02;
 
 function isMarketOpen(): boolean {
     const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
@@ -59,25 +55,7 @@ serve(async (req) => {
 
         if (!ALPACA_KEY || !ALPACA_SECRET) throw new Error("Missing Alpaca API credentials.");
 
-        const { data: lastTrade } = await supabase
-            .from("trades")
-            .select("created_at")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (lastTrade?.created_at) {
-            const ageMs = Date.now() - new Date(lastTrade.created_at).getTime();
-            if (ageMs < MIN_MINUTES_BETWEEN_TRADES * 60 * 1000) {
-                await supabase.from("agent_logs").insert({
-                    agent_name: "Swarm Orchestrator",
-                    log_type: "info",
-                    message: `Cooldown active (${Math.round(ageMs / 60000)}m ago). Skipping cycle.`,
-                });
-                return new Response(JSON.stringify({ success: true, message: "Cooldown active" }), {
-                    headers: { ...corsHeaders, "Content-Type": "application/json" }
-                });
-            }
-        }
+        // NO COOLDOWN — trade whenever opportunities arise
 
         // 1. FETCH CONTEXT
         const [accRes, posRes, ordersRes] = await Promise.all([
@@ -101,24 +79,32 @@ serve(async (req) => {
         const equity = parseFloat(account.equity || "0");
         const cash = parseFloat(account.cash || "0");
         const buyingPower = parseFloat(account.buying_power || "0");
-        const minCashBuffer = equity * CASH_BUFFER_PCT;
-        const maxAllocation = equity * MAX_ALLOCATION_PCT;
 
-        if (buyingPower < MIN_BUYING_POWER) {
+        // AGGRESSIVE SCALING: When buying power is high, allocate more per trade
+        // High BP (>80% of equity) → up to 5% per trade
+        // Medium BP (40-80%) → up to 3% per trade
+        // Low BP (<40%) → conservative 1.5% per trade
+        const bpRatio = buyingPower / Math.max(equity, 1);
+        const allocationPct = bpRatio > 0.8 ? 0.05 : bpRatio > 0.4 ? 0.03 : 0.015;
+        const maxAllocation = equity * allocationPct;
+        const minCashBuffer = equity * 0.15; // 15% buffer instead of 25% — more aggressive
+
+        if (buyingPower < 500) {
             await supabase.from("agent_logs").insert({
                 agent_name: "Swarm Orchestrator",
                 log_type: "info",
-                message: `Buying power below $${MIN_BUYING_POWER}. Skipping cycle.`,
+                message: `Buying power below $500. Skipping cycle.`,
             });
             return new Response(JSON.stringify({ success: true, message: "Insufficient buying power" }), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" }
             });
         }
 
-        console.log(`Equity: $${account.equity}, Positions: ${currentHoldings.length}, Cash: $${account.cash}`);
+        console.log(`Equity: $${account.equity}, BP: $${buyingPower}, Allocation: ${(allocationPct*100).toFixed(1)}%, Positions: ${currentHoldings.length}`);
 
         // 2. FETCH REAL MARKET DATA for decision-making
-        const watchlist = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "AMZN", "META", "SPY", "QQQ", "AMD"];
+        const watchlist = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "AMZN", "META", "SPY", "QQQ", "AMD",
+                           "NFLX", "CRM", "UBER", "COIN", "PLTR", "SOFI", "RIVN", "ARM", "SMCI", "AVGO"];
         const snapshotsRes = await fetch(
             `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${watchlist.join(",")}`,
             { headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET } }
@@ -152,54 +138,64 @@ serve(async (req) => {
             } catch (e) { console.error("News fetch failed", e); }
         }
 
-        // 4. BRAIN SYNTHESIS — selective, data-driven
+        // 4. BRAIN SYNTHESIS — aggressive, data-driven
         if (!LOVABLE_API_KEY) {
             console.warn("LOVABLE_API_KEY missing.");
             return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), { status: 401 });
         }
+
+        const aggressivenessNote = bpRatio > 0.8
+            ? "You have HIGH buying power (>80% of equity). Be AGGRESSIVE — look for 2-3 strong opportunities. Allocate up to 5% per trade. Open multiple positions if signals are strong."
+            : bpRatio > 0.4
+            ? "You have MODERATE buying power. Be strategic — pick the best 1-2 opportunities. Allocate up to 3% per trade."
+            : "You have LIMITED buying power. Be selective — only take the highest conviction trade. Allocate up to 1.5% per trade.";
 
         const brainPrompt = {
             model: "google/gemini-3-flash-preview",
             messages: [
                 {
                     role: "system",
-                    content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system. 
-You make REAL trades on Alpaca Paper. Your goal: preserve capital and take only high-quality opportunities.
+                    content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system on Alpaca Paper Trading.
+You make REAL trades. Your job: identify and execute the best opportunities from real-time market data.
+
+${aggressivenessNote}
 
 RULES:
-- Be selective. If conviction < 0.85, return HOLD.
-- Only ONE trade maximum per cycle.
-- Do NOT trade symbols with open orders.
-- If market is closed, only place LIMIT orders (no market orders).
-- Analyze the REAL market data, prices, volumes, and day changes provided.
-- Consider news sentiment when making decisions.
-- Max 2% of equity per position for risk management.
-- Maintain a cash buffer of at least 25% of equity.
-- You can BUY stocks you don't hold, SELL stocks you do hold, or HOLD.
-- Consider momentum, mean reversion, breakouts, and sector rotation.
-- If a stock is down significantly and fundamentals are strong → consider BUY.
-- If a stock is up big with weakening momentum → consider taking profit (SELL).
+- NO cooldowns. Trade whenever you see opportunity.
+- You can open NEW positions (BUY stocks you don't hold).
+- You can SELL stocks you do hold to take profit or cut losses.
+- Analyze the REAL market data: prices, day changes, volumes, news.
+- Consider momentum, mean reversion, breakouts, sector rotation.
+- If a stock is down significantly with strong fundamentals → BUY opportunity.
+- If a stock is up big with weakening momentum → take profit (SELL).
+- Conviction threshold: 0.7 minimum (not 0.85 — be more aggressive).
+- Max allocation: ${(allocationPct*100).toFixed(1)}% of equity ($${maxAllocation.toFixed(0)}) per trade.
+- Cash buffer: keep at least 15% of equity in cash.
+- If market is closed, use LIMIT orders (GTC).
+- If market is open, use MARKET orders for speed.
 
-Return JSON: {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, "reasoning": "string", "conviction": 0.0-1.0}
-- For BUY: pick the best opportunity from the watchlist
-- For SELL: pick a position to exit if appropriate  
-- qty should be meaningful (1-10 shares based on price and portfolio size)
-- If multiple opportunities, pick the STRONGEST signal`
+Return a SINGLE JSON object (not an array): {"action": "BUY"|"SELL"|"HOLD", "symbol": "TICKER", "qty": number, "reasoning": "string", "conviction": 0.0-1.0}
+- Pick THE SINGLE BEST opportunity. Do NOT return an array.
+- qty should reflect the allocation strategy (calculate based on price and max allocation)
+- Be specific in reasoning: cite price, change%, volume, news
+- If HOLD, explain what you're waiting for`
                 },
                 {
                     role: "user",
-                    content: `PORTFOLIO: $${account.equity} equity, $${account.cash} cash, $${account.buying_power} buying power
-POSITIONS: ${currentHoldings.length > 0 ? currentHoldings.join(", ") : "NONE"}
-OPEN ORDERS: ${Array.isArray(openOrders) ? openOrders.length : 0}
-MARKET OPEN: ${marketOpen ? "YES" : "NO"} | NEXT OPEN: ${clock?.next_open || "unknown"} | NEXT CLOSE: ${clock?.next_close || "unknown"}
+                    content: `PORTFOLIO STATE:
+Equity: $${equity.toFixed(2)} | Cash: $${cash.toFixed(2)} | Buying Power: $${buyingPower.toFixed(2)}
+BP Ratio: ${(bpRatio*100).toFixed(0)}% | Max Per Trade: $${maxAllocation.toFixed(0)}
+Current Positions: ${currentHoldings.length > 0 ? currentHoldings.join(", ") : "NONE"}
+Open Orders: ${Array.isArray(openOrders) ? openOrders.length : 0}
+Market: ${marketOpen ? "OPEN" : "CLOSED"} | Next ${marketOpen ? "close" : "open"}: ${clock?.next_open || "unknown"}
 
 REAL-TIME MARKET DATA:
 ${marketContext}
 
 NEWS HEADLINES:
-${newsHeadlines.length > 0 ? newsHeadlines.map(h => `• ${h}`).join("\n") : "No recent news"}
+${newsHeadlines.length > 0 ? newsHeadlines.map(h => `• ${h}`).join("\n") : "No recent news available"}
 
-Analyze and make your trading decision. Be conservative and smart.`
+Make your trading decision NOW. Remember: you're aggressive when buying power is high.`
                 }
             ],
             response_format: { type: "json_object" }
@@ -221,9 +217,13 @@ Analyze and make your trading decision. Be conservative and smart.`
         const aiContent = aiData.choices?.[0]?.message?.content;
         if (!aiContent) throw new Error("Empty AI response content.");
 
-        const decision = JSON.parse(aiContent);
+        let decision = JSON.parse(aiContent);
+        // Handle if AI returns an array — take the highest conviction entry
+        if (Array.isArray(decision)) {
+            decision = decision.sort((a: any, b: any) => (b.conviction || 0) - (a.conviction || 0))[0] || { action: "HOLD", symbol: watchlist[0], qty: 0, reasoning: "Empty AI array", conviction: 0 };
+        }
         const symbol = decision.symbol || watchlist[0];
-        const qty = Math.max(1, Math.min(decision.qty || 1, 20));
+        const qty = Math.max(1, Math.min(decision.qty || 1, 50));
         console.log(`Omni-Brain Decision: ${decision.action} ${qty} ${symbol} (conviction: ${decision.conviction})`);
 
         // 5. EXECUTE TRADE
@@ -232,12 +232,12 @@ Analyze and make your trading decision. Be conservative and smart.`
         const snap = snapshots[symbol];
         const bid = snap?.latestQuote?.bp;
         const ask = snap?.latestQuote?.ap;
-        const lastTrade = snap?.latestTrade?.p || snap?.dailyBar?.c;
-        const refPrice = decision.action === "BUY" ? (ask || lastTrade) : (bid || lastTrade);
+        const snapPrice = snap?.latestTrade?.p || snap?.dailyBar?.c;
+        const refPrice = decision.action === "BUY" ? (ask || snapPrice) : (bid || snapPrice);
 
-        if (decision.conviction < 0.8) {
+        if (decision.conviction < 0.7) {
             decision.action = "HOLD";
-            tradeResult = `HOLD (low conviction) — ${decision.reasoning}`;
+            tradeResult = `HOLD (conviction ${decision.conviction} below 0.7) — ${decision.reasoning}`;
         }
         if (openOrderSymbols.has(symbol)) {
             decision.action = "HOLD";
@@ -252,87 +252,30 @@ Analyze and make your trading decision. Be conservative and smart.`
             decision.qty = Math.min(qty, maxQty);
         }
 
-        const effectiveQty = Math.max(1, Math.min(decision.qty || qty, 20));
+        const effectiveQty = Math.max(1, Math.min(decision.qty || qty, 50));
 
-        if (decision.action === "BUY" && parseFloat(account.buying_power) > 100) {
+        if (decision.action === "BUY" && buyingPower > 500) {
             if (!marketOpen && !refPrice) {
                 tradeResult = "ORDER SKIPPED: No live quote for limit pricing.";
             } else {
-            const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
-                method: "POST",
-                headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    symbol: symbol.replace("/", ""),
-                    qty: String(effectiveQty),
-                    side: "buy",
-                    type: marketOpen ? "market" : "limit",
-                    time_in_force: marketOpen ? "day" : "gtc",
-                    limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 1.001).toFixed(2))
-                })
-            });
-            if (orderRes.ok) {
-                const orderData = await orderRes.json();
-                tradeResult = `EXECUTED BUY: ${effectiveQty} ${symbol}`;
-                tradeExecuted = true;
-
-                // Wait for fill
-                let fillPrice = 0;
-                for (let i = 0; i < 8; i++) {
-                    await new Promise(r => setTimeout(r, 2000));
-                    const checkRes = await fetch(`${ALPACA_URL}/v2/orders/${orderData.id}`, {
-                        headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET },
-                    });
-                    if (checkRes.ok) {
-                        const check = await checkRes.json();
-                        if (check.status === "filled") { fillPrice = parseFloat(check.filled_avg_price); break; }
-                    }
-                }
-
-                // Record trade
-                await supabase.from("trades").insert({
-                    symbol, side: "BUY", qty: effectiveQty, price: fillPrice, total_value: fillPrice * effectiveQty,
-                    agent: "Omni-Brain", strategy: "AI Synthesis",
-                    reasoning: decision.reasoning, status: "executed",
-                    alpaca_order_id: orderData.id,
-                });
-
-                await sendDiscord("", [{
-                    title: `🟢 BUY EXECUTED — ${symbol}`,
-                    description: `**Qty:** ${effectiveQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Total:** $${(fillPrice * effectiveQty).toFixed(2)}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%\n**Reasoning:** ${decision.reasoning}`,
-                    color: 0x00ff41,
-                    footer: { text: "ACE_OS Omni-Brain" },
-                    timestamp: new Date().toISOString(),
-                }]);
-            } else {
-                const errText = await orderRes.text();
-                tradeResult = `ORDER FAILED: ${errText}`;
-                await sendDiscord(`❌ BUY ORDER FAILED for ${symbol}: ${errText}`);
-            }
-            }
-        } else if (decision.action === "SELL" && currentHoldings.includes(symbol)) {
-            const posData = positions.find((p: any) => p.symbol === symbol);
-            const sellQty = Math.min(effectiveQty, parseInt(posData?.qty || "0"));
-            if (sellQty > 0) {
-                if (!marketOpen && !refPrice) {
-                    tradeResult = "ORDER SKIPPED: No live quote for limit pricing.";
-                } else {
                 const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
                     method: "POST",
                     headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
                     body: JSON.stringify({
                         symbol: symbol.replace("/", ""),
-                        qty: String(sellQty),
-                        side: "sell",
+                        qty: String(effectiveQty),
+                        side: "buy",
                         type: marketOpen ? "market" : "limit",
                         time_in_force: marketOpen ? "day" : "gtc",
-                        limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 0.999).toFixed(2))
+                        limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 1.002).toFixed(2))
                     })
                 });
                 if (orderRes.ok) {
                     const orderData = await orderRes.json();
-                    tradeResult = `EXECUTED SELL: ${sellQty} ${symbol}`;
+                    tradeResult = `EXECUTED BUY: ${effectiveQty} ${symbol}`;
                     tradeExecuted = true;
 
+                    // Wait for fill
                     let fillPrice = 0;
                     for (let i = 0; i < 8; i++) {
                         await new Promise(r => setTimeout(r, 2000));
@@ -345,24 +288,81 @@ Analyze and make your trading decision. Be conservative and smart.`
                         }
                     }
 
+                    // Record trade
                     await supabase.from("trades").insert({
-                        symbol, side: "SELL", qty: sellQty, price: fillPrice, total_value: fillPrice * sellQty,
+                        symbol, side: "BUY", qty: effectiveQty, price: fillPrice, total_value: fillPrice * effectiveQty,
                         agent: "Omni-Brain", strategy: "AI Synthesis",
                         reasoning: decision.reasoning, status: "executed",
                         alpaca_order_id: orderData.id,
                     });
 
                     await sendDiscord("", [{
-                        title: `🔴 SELL EXECUTED — ${symbol}`,
-                        description: `**Qty:** ${sellQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Reasoning:** ${decision.reasoning}`,
-                        color: 0xff4444,
+                        title: `🟢 BUY EXECUTED — ${symbol}`,
+                        description: `**Qty:** ${effectiveQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Total:** $${(fillPrice * effectiveQty).toFixed(2)}\n**Conviction:** ${(decision.conviction * 100).toFixed(0)}%\n**BP Ratio:** ${(bpRatio*100).toFixed(0)}%\n**Reasoning:** ${decision.reasoning}`,
+                        color: 0x00ff41,
                         footer: { text: "ACE_OS Omni-Brain" },
                         timestamp: new Date().toISOString(),
                     }]);
                 } else {
                     const errText = await orderRes.text();
-                    tradeResult = `SELL FAILED: ${errText}`;
+                    tradeResult = `ORDER FAILED: ${errText}`;
+                    await sendDiscord(`❌ BUY ORDER FAILED for ${symbol}: ${errText}`);
                 }
+            }
+        } else if (decision.action === "SELL" && currentHoldings.includes(symbol)) {
+            const posData = positions.find((p: any) => p.symbol === symbol);
+            const sellQty = Math.min(effectiveQty, parseInt(posData?.qty || "0"));
+            if (sellQty > 0) {
+                if (!marketOpen && !refPrice) {
+                    tradeResult = "ORDER SKIPPED: No live quote for limit pricing.";
+                } else {
+                    const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
+                        method: "POST",
+                        headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            symbol: symbol.replace("/", ""),
+                            qty: String(sellQty),
+                            side: "sell",
+                            type: marketOpen ? "market" : "limit",
+                            time_in_force: marketOpen ? "day" : "gtc",
+                            limit_price: marketOpen ? undefined : Number(((refPrice || 0) * 0.999).toFixed(2))
+                        })
+                    });
+                    if (orderRes.ok) {
+                        const orderData = await orderRes.json();
+                        tradeResult = `EXECUTED SELL: ${sellQty} ${symbol}`;
+                        tradeExecuted = true;
+
+                        let fillPrice = 0;
+                        for (let i = 0; i < 8; i++) {
+                            await new Promise(r => setTimeout(r, 2000));
+                            const checkRes = await fetch(`${ALPACA_URL}/v2/orders/${orderData.id}`, {
+                                headers: { "APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET },
+                            });
+                            if (checkRes.ok) {
+                                const check = await checkRes.json();
+                                if (check.status === "filled") { fillPrice = parseFloat(check.filled_avg_price); break; }
+                            }
+                        }
+
+                        await supabase.from("trades").insert({
+                            symbol, side: "SELL", qty: sellQty, price: fillPrice, total_value: fillPrice * sellQty,
+                            agent: "Omni-Brain", strategy: "AI Synthesis",
+                            reasoning: decision.reasoning, status: "executed",
+                            alpaca_order_id: orderData.id,
+                        });
+
+                        await sendDiscord("", [{
+                            title: `🔴 SELL EXECUTED — ${symbol}`,
+                            description: `**Qty:** ${sellQty}\n**Fill:** $${fillPrice.toFixed(2)}\n**Reasoning:** ${decision.reasoning}`,
+                            color: 0xff4444,
+                            footer: { text: "ACE_OS Omni-Brain" },
+                            timestamp: new Date().toISOString(),
+                        }]);
+                    } else {
+                        const errText = await orderRes.text();
+                        tradeResult = `SELL FAILED: ${errText}`;
+                    }
                 }
             }
         } else if (decision.action === "HOLD") {
