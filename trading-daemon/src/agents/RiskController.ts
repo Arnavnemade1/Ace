@@ -12,6 +12,10 @@ export class RiskController {
     private cashBufferPct = 0.25; // keep 25% cash
     private maxAllocationPct = 0.02; // max 2% equity per trade
 
+    // new conservative parameters
+    private reserveBuyingPowerPct = 0.5;      // always keep at least 50% of buying power untouched
+    private maxDailySpendPct = 0.1;           // spend no more than 10% of buying power per NY day
+
     // [x] Phase 32: Symbol Fatigue & Manual Blacklist
     private SYMBOL_BLACKLIST = new Set(['HOOD', 'SOFI', 'ABBV']);
     private LOW_RISK_SYMBOLS = new Set(['SPY', 'QQQ', 'VTI', 'IWM', 'DIA', 'TLT', 'SHY', 'USFR']);
@@ -166,6 +170,27 @@ export class RiskController {
         const buyingPower = parseFloat(account.buying_power);
         const cash = parseFloat(account.cash ?? account.buying_power ?? "0");
         const minCashBuffer = equity * this.cashBufferPct;
+
+        // compute remaining daily budget (NY timezone)
+        const nowNY = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const startOfDay = new Date(nowNY);
+        startOfDay.setHours(0, 0, 0, 0);
+        const { data: todayBuys } = await supabase
+            .from('trades')
+            .select('total_value')
+            .eq('side', 'BUY')
+            .gte('created_at', startOfDay.toISOString());
+        const spentToday = (todayBuys || []).reduce((sum: number, t: any) => sum + (t.total_value || 0), 0);
+        const dailyLimit = buyingPower * this.maxDailySpendPct;
+        const remainingDailyBudget = Math.max(0, dailyLimit - spentToday);
+
+        if (spentToday >= dailyLimit) {
+            await logAgentAction('Risk Controller', 'info',
+                `Daily buy limit reached ($${spentToday.toFixed(2)} >= $${dailyLimit.toFixed(2)}). Skipping new BUYs.`
+            );
+            return { executed, queued };
+        }
+
         const maxPerTrade = Math.min(equity * maxAllocationPct, buyingPower * 0.25, 5000); // allocation, 25% BP, or $5000
 
         let executedThisCycle = 0;
@@ -182,8 +207,24 @@ export class RiskController {
             const price = await this.getLivePrice(signal.symbol, signal.metadata?.price_observed || 0);
             if (price <= 0) continue;
 
-            const qty = Math.max(1, Math.floor(maxPerTrade / price));
+            // calculate quantity respecting per–trade cap, remaining daily budget, and reserve
+            let effectiveMax = maxPerTrade;
+            if (signal.signal_type === 'BUY') {
+                // don't propose a trade that uses more than the leftover daily budget
+                effectiveMax = Math.min(effectiveMax, remainingDailyBudget);
+            }
+            const qty = Math.max(1, Math.floor(effectiveMax / price));
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
+
+            if (side === 'buy') {
+                // ensure buying power reserve remains after executing this quantity
+                if (buyingPower - qty * price < buyingPower * this.reserveBuyingPowerPct) {
+                    await logAgentAction('Risk Controller', 'info',
+                        `Preserving reserve: would drop below ${Math.round(this.reserveBuyingPowerPct * 100)}% BP. Skipping BUY ${signal.symbol}.`
+                    );
+                    continue;
+                }
+            }
 
             if (side === 'buy') {
                 if (signal.strength < buyStrengthThreshold) {

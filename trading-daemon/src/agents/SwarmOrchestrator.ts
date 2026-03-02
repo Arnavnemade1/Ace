@@ -29,9 +29,12 @@ export class SwarmOrchestrator {
     private currentSectorIndex = 0;
     private isRunning = false;
     private cycleCounter = 0;
-    private discordInterval = 30;   // Discord brief every 30 minutes
+    private discordInterval = 30;   // Discord brief interval in minutes
     private executionInterval = 6;  // Execute signals every 6 cycles (cooldown)
     private latestSentiment = 0.5;
+
+    // timestamp of last discord post (ms)
+    private lastDiscordTs = 0;
 
     async start() {
         this.isRunning = true;
@@ -201,9 +204,11 @@ export class SwarmOrchestrator {
             await logAgentAction('Risk Controller', 'info', `No actionable signals. Global Sentiment: ${pulse.newsSentiment.toFixed(2)}.`);
         }
 
-        // 6. Discord brief every 30 cycles
-        if (this.cycleCounter % this.discordInterval === 0) {
+        // 6. Discord brief at real‑time intervals (minutes)
+        const nowTs = Date.now();
+        if (!this.lastDiscordTs || nowTs - this.lastDiscordTs >= this.discordInterval * 60 * 1000) {
             await this.postDiscordBrief(signals, executionResult, marketOpen, nowET, pulse);
+            this.lastDiscordTs = nowTs;
         }
 
         console.log(`--- Cycle #${this.cycleCounter} complete ---`);
