@@ -125,6 +125,22 @@ serve(async (req) => {
       }
     }
 
+    if (mode === "full_cycle" || mode === "replay_only") {
+      // Phase 6: Causal Replay (typically nightly)
+      const replayResult = await callAgent("causal-replay");
+      results.push(replayResult);
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const totalDuration = results.reduce((sum, r) => sum + r.duration, 0);
+
+    const { data: lastTrade } = await supabase
+      .from("trades")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const { data: orchestratorState } = await supabase
       .from("agent_state")
       .select("config")
