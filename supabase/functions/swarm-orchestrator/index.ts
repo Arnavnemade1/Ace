@@ -13,14 +13,15 @@ const ALPACA_DATA = "https://data.alpaca.markets";
 const GEMINI_DIRECT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 // AI Gateway with Gemini fallback to minimize costs
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay = 2000): Promise<T> {
   let delay = initialDelay;
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error: any) {
-      if (error.message?.includes("429") && i < maxRetries - 1) {
-        console.log(`429 Rate Limit hit. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+      const isRateLimit = error.message?.includes("429") || error.message?.toLowerCase().includes("rate limit");
+      if (isRateLimit && i < maxRetries - 1) {
+        console.log(`[Retry] 429/Rate Limit hit. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
         await new Promise(r => setTimeout(r, delay));
         delay *= 2; // Exponential backoff
         continue;
@@ -28,30 +29,33 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay =
       throw error;
     }
   }
-  return await fn(); // Should not reach here
+  return await fn();
 }
 
 async function callAI(lovableKey: string, geminiKey: string, messages: any[], jsonMode = true): Promise<string> {
-  // Try Lovable AI first
+  // Try Lovable AI first (with retry)
   if (lovableKey) {
     try {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages,
-          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-        }),
-      });
-      if (res.ok) {
+      const content = await withRetry(async () => {
+        const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "google/gemini-3-flash-preview",
+            messages,
+            ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+          }),
+        });
+        if (!res.ok) throw new Error(`Lovable API error: ${res.status}`);
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content;
-        if (content) return content;
-      }
-      console.log("Lovable AI failed, falling back to Gemini direct");
+        if (!content) throw new Error("Empty content from Lovable");
+        return content;
+      }, 3, 1000); // 3 retries for Lovable
+
+      if (content) return content;
     } catch (e) {
-      console.log("Lovable AI error, falling back:", e);
+      console.log("Lovable AI failed after retries, falling back to Gemini direct:", e.message);
     }
   }
 

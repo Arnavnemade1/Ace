@@ -79,6 +79,23 @@ serve(async (req) => {
       }
     };
 
+    const { data: executedToday } = await supabase
+      .from("trades")
+      .select("id")
+      .eq("status", "executed")
+      .gte("created_at", dayStartNY.toISOString());
+    const executedCount = executedToday?.length || 0;
+
+    // enforce daily trade cap from constant above
+    const overDailyCap = executedCount >= DAILY_TRADE_CAP;
+    if (overDailyCap) {
+      await supabase.from("agent_logs").insert({
+        agent_name: "Orchestrator",
+        log_type: "warning",
+        message: `Daily trade cap (${DAILY_TRADE_CAP}) reached; skipping execution phases.`,
+      });
+    }
+
     const results: any[] = [];
 
     if (mode === "full_cycle" || mode === "scan_only") {
@@ -106,38 +123,6 @@ serve(async (req) => {
         const optimizerResult = await callAgent("portfolio-optimizer");
         results.push(optimizerResult);
       }
-    }
-
-    if (mode === "full_cycle" || mode === "replay_only") {
-      // Phase 6: Causal Replay (typically nightly)
-      const replayResult = await callAgent("causal-replay");
-      results.push(replayResult);
-    }
-
-    const successCount = results.filter((r) => r.success).length;
-    const totalDuration = results.reduce((sum, r) => sum + r.duration, 0);
-
-    const { data: lastTrade } = await supabase
-      .from("trades")
-      .select("created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const { data: executedToday } = await supabase
-      .from("trades")
-      .select("id")
-      .eq("status", "executed")
-      .gte("created_at", dayStartNY.toISOString());
-    const executedCount = executedToday?.length || 0;
-
-    // enforce daily trade cap from constant above
-    const overDailyCap = executedCount >= DAILY_TRADE_CAP;
-    if (overDailyCap) {
-      await supabase.from("agent_logs").insert({
-        agent_name: "Orchestrator",
-        log_type: "warning",
-        message: `Daily trade cap (${DAILY_TRADE_CAP}) reached; skipping execution phases.`,
-      });
     }
 
     const { data: orchestratorState } = await supabase
