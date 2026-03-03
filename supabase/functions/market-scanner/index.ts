@@ -22,6 +22,52 @@ function isMarketOpen(): boolean {
   return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
+// Pure algorithmic signal detection — NO AI calls to save API costs
+function detectSignals(ranked: any[]): any[] {
+  const signals: any[] = [];
+  for (const r of ranked) {
+    const absChange = Math.abs(r.change);
+    if (absChange < 1.5) continue; // Only significant movers
+
+    let signalType = "";
+    let strength = 0;
+    let reasoning = "";
+
+    // Momentum signals
+    if (r.change > 3 && r.vol > 500000) {
+      signalType = "momentum_long";
+      strength = Math.min(0.95, 0.6 + (r.change / 20));
+      reasoning = `Strong upward momentum: +${r.change.toFixed(2)}% on ${(r.vol / 1e6).toFixed(1)}M volume`;
+    } else if (r.change < -3 && r.vol > 500000) {
+      signalType = "momentum_short";
+      strength = Math.min(0.95, 0.6 + (Math.abs(r.change) / 20));
+      reasoning = `Strong downward momentum: ${r.change.toFixed(2)}% on ${(r.vol / 1e6).toFixed(1)}M volume`;
+    }
+    // Mean reversion on extreme moves
+    else if (r.change > 6) {
+      signalType = "mean_reversion_short";
+      strength = Math.min(0.9, 0.65 + (r.change / 30));
+      reasoning = `Overextended +${r.change.toFixed(2)}%, potential mean reversion`;
+    } else if (r.change < -6) {
+      signalType = "mean_reversion_long";
+      strength = Math.min(0.9, 0.65 + (Math.abs(r.change) / 30));
+      reasoning = `Oversold ${r.change.toFixed(2)}%, potential bounce`;
+    }
+    // Volume spike breakouts
+    else if (absChange > 2 && r.vol > 2000000) {
+      signalType = r.change > 0 ? "breakout" : "breakdown";
+      strength = Math.min(0.85, 0.6 + (r.vol / 10000000));
+      reasoning = `${r.change > 0 ? "Breakout" : "Breakdown"}: ${r.change.toFixed(2)}% on high volume ${(r.vol / 1e6).toFixed(1)}M`;
+    }
+
+    if (signalType && strength >= 0.6) {
+      signals.push({ symbol: r.symbol, signal_type: signalType, strength: Math.round(strength * 100) / 100, reasoning });
+    }
+    if (signals.length >= 15) break;
+  }
+  return signals;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -29,15 +75,11 @@ serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!ALPACA_API_KEY || !ALPACA_API_SECRET) throw new Error("Alpaca keys not configured");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Market Scanner");
 
     const marketOpen = isMarketOpen();
-
-    // HYPER MODE: During market hours scan 400 symbols, off-hours scan 150
     const scanSize = marketOpen ? 400 : 150;
 
     // Fetch tradable universe
@@ -52,7 +94,7 @@ serve(async (req) => {
         .map((a: any) => a.symbol);
     }
 
-    // Rotating cursor for full coverage
+    // Rotating cursor
     const { data: stateRow } = await supabase.from("agent_state").select("config").eq("agent_name", "Market Scanner").maybeSingle();
     const config = (stateRow?.config || {}) as Record<string, any>;
     const cursor = Number(config.scan_cursor || 0);
@@ -63,7 +105,7 @@ serve(async (req) => {
     const nextCursor = (cursor + scanSymbols.length) % Math.max(universe.length, 1);
 
     await supabase.from("agent_state").update({
-      config: { ...config, scan_cursor: nextCursor, universe_size: universe.length, mode: marketOpen ? "HYPER" : "STANDARD" },
+      config: { ...config, scan_cursor: nextCursor, universe_size: universe.length, mode: marketOpen ? "HYPER" : "STANDARD", last_symbols: scanSymbols.slice(0, 50) },
       updated_at: new Date().toISOString(),
     }).eq("agent_name", "Market Scanner");
 
@@ -93,61 +135,8 @@ serve(async (req) => {
       .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
       .slice(0, 50);
 
-    const marketContext = ranked.map(r =>
-      `${r.symbol}: $${r.price.toFixed(2)} (${r.change >= 0 ? "+" : ""}${r.change.toFixed(2)}%) Vol:${r.vol}`
-    ).join("\n");
-
-    // AI signal detection
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: `You are a market scanner. Analyze real stock data and find high-quality trading signals.
-Signal types: momentum_long, momentum_short, mean_reversion_long, mean_reversion_short, breakout, breakdown, vol_spike.
-Strength: 0.0-1.0 (only report >= 0.6). Max 15 signals. Be selective — quality over quantity.` },
-          { role: "user", content: `Market mode: ${marketOpen ? "HYPER (open)" : "PREP (closed)"}\nTop movers from ${scanSymbols.length} symbols:\n${marketContext}` },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "report_signals",
-            description: "Report market signals",
-            parameters: {
-              type: "object",
-              properties: {
-                signals: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      symbol: { type: "string" },
-                      signal_type: { type: "string" },
-                      strength: { type: "number" },
-                      reasoning: { type: "string" },
-                    },
-                    required: ["symbol", "signal_type", "strength", "reasoning"],
-                  },
-                },
-              },
-              required: ["signals"],
-            },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "report_signals" } },
-      }),
-    });
-
-    let signals: any[] = [];
-    if (aiRes.ok) {
-      const aiData = await aiRes.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (toolCall?.function?.arguments) {
-        const parsed = JSON.parse(toolCall.function.arguments);
-        signals = (parsed.signals || []).filter((s: any) => s.strength >= 0.6).slice(0, 15);
-      }
-    }
+    // ALGORITHMIC signal detection — no AI call needed, saves API costs
+    const signals = detectSignals(ranked);
 
     if (signals.length > 0) {
       await supabase.from("signals").insert(signals.map((s: any) => ({
@@ -158,9 +147,16 @@ Strength: 0.0-1.0 (only report >= 0.6). Max 15 signals. Be selective — quality
       })));
     }
 
+    // Log to analytics
+    await supabase.from("live_api_streams").insert({
+      source: "MarketScanner",
+      symbol_or_context: "SCAN_RESULT",
+      payload: { mode: marketOpen ? "HYPER" : "STANDARD", scanned: scanSymbols.length, signals_found: signals.length, top_movers: ranked.slice(0, 10).map(r => ({ s: r.symbol, c: r.change, v: r.vol })) },
+    });
+
     await supabase.from("agent_logs").insert({
       agent_name: "Market Scanner", log_type: "info",
-      message: `${marketOpen ? "HYPER" : "STANDARD"} scan: ${scanSymbols.length} symbols → ${signals.length} signals (universe: ${universe.length})`,
+      message: `${marketOpen ? "HYPER" : "STANDARD"} scan: ${scanSymbols.length} symbols → ${signals.length} signals (universe: ${universe.length}) [NO AI — algorithmic]`,
     });
 
     await supabase.from("agent_state").update({
@@ -168,8 +164,6 @@ Strength: 0.0-1.0 (only report >= 0.6). Max 15 signals. Be selective — quality
       last_action: `${marketOpen ? "Hyper" : "Standard"} scan: ${scanSymbols.length} symbols`,
       last_action_at: new Date().toISOString(), status: "idle",
     }).eq("agent_name", "Market Scanner");
-
-    // NO Discord messages from scanner — orchestrator sends consolidated briefs only
 
     return new Response(JSON.stringify({ success: true, mode: marketOpen ? "HYPER" : "STANDARD", scanned: scanSymbols.length, signals_found: signals.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

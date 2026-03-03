@@ -10,6 +10,55 @@ const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
 const ALPACA_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA = "https://data.alpaca.markets";
+const GEMINI_DIRECT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+// AI Gateway with Gemini fallback to minimize costs
+async function callAI(lovableKey: string, geminiKey: string, messages: any[], jsonMode = true): Promise<string> {
+  // Try Lovable AI first
+  if (lovableKey) {
+    try {
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages,
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (content) return content;
+      }
+      console.log("Lovable AI failed, falling back to Gemini direct");
+    } catch (e) {
+      console.log("Lovable AI error, falling back:", e);
+    }
+  }
+
+  // Fallback to Gemini direct API
+  if (!geminiKey) throw new Error("No AI keys available (both Lovable and Gemini missing)");
+
+  const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
+  const userMsg = messages.find((m: any) => m.role === "user")?.content || "";
+
+  const geminiRes = await fetch(`${GEMINI_DIRECT_URL}?key=${geminiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${systemMsg}\n\n${userMsg}` }] }],
+      generationConfig: {
+        ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
+    }),
+  });
+  if (!geminiRes.ok) throw new Error(`Gemini API error: ${geminiRes.status}`);
+  const geminiData = await geminiRes.json();
+  return geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
 
 // ── WIDE UNIVERSE: 80+ diverse stocks across sectors ──
 const UNIVERSE = {
@@ -69,6 +118,7 @@ serve(async (req) => {
 
   const supabase = createClient(GET_SECRET("SUPABASE_URL"), GET_SECRET("SUPABASE_SERVICE_ROLE_KEY"));
   const LOVABLE_API_KEY = GET_SECRET("LOVABLE_API_KEY");
+  const GEMINI_API_KEY = GET_SECRET("GEMINI_API_KEY");
   const ALPACA_KEY = GET_SECRET("ALPACA_API_KEY");
   const ALPACA_SECRET = GET_SECRET("ALPACA_API_SECRET");
   const DISCORD_WEBHOOK_URL = GET_SECRET("DISCORD_WEBHOOK_URL");
@@ -88,7 +138,7 @@ serve(async (req) => {
   try {
     console.log("--- ACE_OS Orchestrator Cycle ---");
     if (!ALPACA_KEY || !ALPACA_SECRET) throw new Error("Missing Alpaca credentials");
-    if (!LOVABLE_API_KEY) throw new Error("Missing LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY && !GEMINI_API_KEY) throw new Error("Missing AI keys (need LOVABLE_API_KEY or GEMINI_API_KEY)");
 
     // ═══════════════════════════════════════════════════
     // 1. FETCH FULL ACCOUNT STATE
@@ -224,6 +274,18 @@ serve(async (req) => {
           content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system on Alpaca.
 You make REAL trades with real paper money. You must be SMART, STRATEGIC, and DIVERSIFIED.
 
+═══ GEOPOLITICAL & MACRO AWARENESS ═══
+You MUST factor in current world events when trading. Examples:
+- Wars/conflicts (e.g. Middle East tensions, Iran situation) → BOOST defense stocks (LMT, RTX, GD, NOC, BA), energy (XOM, CVX, OXY)
+- Interest rate decisions → affects financials (JPM, BAC, GS), real estate, growth stocks
+- AI/tech regulation → impacts NVDA, GOOGL, META, PLTR, MSFT
+- Trade wars/tariffs → watch supply chain-heavy companies (AAPL, TSLA, NKE)
+- Election cycles → watch healthcare, defense, energy sectors
+- Crypto regulation → impacts COIN, MSTR, crypto-adjacent
+- Weather events → energy prices, insurance, agriculture
+- Pandemic/health scares → pharma (PFE, MRNA), health (UNH, JNJ)
+ALWAYS connect current headlines to sector impacts. Think like a macro strategist.
+
 ═══ CORE PRINCIPLES ═══
 1. DIVERSIFICATION: Never over-concentrate in one sector. Spread across TECH, SEMIS, FINANCE, ENERGY, HEALTH, etc.
    Current sector exposure: ${diversificationNote}
@@ -250,9 +312,9 @@ You make REAL trades with real paper money. You must be SMART, STRATEGIC, and DI
 Return a JSON object with an array of up to 3 trades:
 {
   "trades": [
-    {"action": "BUY"|"SELL", "symbol": "TICKER", "qty": number, "reasoning": "detailed why", "conviction": 0.0-1.0}
+    {"action": "BUY"|"SELL", "symbol": "TICKER", "qty": number, "reasoning": "detailed why including geopolitical factors", "conviction": 0.0-1.0}
   ],
-  "market_outlook": "1-2 sentence market assessment",
+  "market_outlook": "1-2 sentence market assessment factoring geopolitics",
   "portfolio_health": "1-2 sentence portfolio review",
   "loss_lessons": "what you learned from recent losses"
 }
@@ -281,22 +343,12 @@ ${marketContext}
 ═══ NEWS ═══
 ${headlines.length > 0 ? headlines.map(h => `• ${h}`).join("\n") : "No headlines"}
 
-Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from losses.`
+Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from losses, and factor in geopolitical events.`
         }
       ],
-      response_format: { type: "json_object" }
     };
 
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify(brainPrompt)
-    });
-
-    if (!aiRes.ok) throw new Error(`AI Gateway Error: ${aiRes.status}`);
-
-    const aiData = await aiRes.json();
-    const aiContent = aiData.choices?.[0]?.message?.content;
+    const aiContent = await callAI(LOVABLE_API_KEY, GEMINI_API_KEY, brainPrompt.messages, true);
     if (!aiContent) throw new Error("Empty AI response");
 
     let brain: any;

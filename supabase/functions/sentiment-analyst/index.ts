@@ -8,26 +8,31 @@ const corsHeaders = {
 
 const FALLBACK_WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META"];
 
+// Keyword-based sentiment scoring — NO AI calls to save API costs
+const BULLISH_WORDS = new Set(["surge", "soar", "rally", "beat", "record", "upgrade", "growth", "profit", "boom", "strong", "gain", "rise", "jumps", "bullish", "outperform", "breakthrough", "buy", "positive", "optimistic", "expansion"]);
+const BEARISH_WORDS = new Set(["crash", "plunge", "drop", "miss", "downgrade", "loss", "decline", "fall", "weak", "bearish", "selloff", "recession", "layoff", "warning", "cut", "negative", "risk", "fear", "concern", "investigation", "lawsuit", "war", "conflict"]);
+
+function scoreSentiment(text: string): number {
+  const words = text.toLowerCase().split(/\W+/);
+  let score = 0;
+  for (const w of words) {
+    if (BULLISH_WORDS.has(w)) score += 0.15;
+    if (BEARISH_WORDS.has(w)) score -= 0.15;
+  }
+  return Math.max(-1, Math.min(1, score));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Sentiment Analyst");
 
-    const { data: scanState } = await supabase
-      .from("agent_state")
-      .select("config")
-      .eq("agent_name", "Market Scanner")
-      .maybeSingle();
+    const { data: scanState } = await supabase.from("agent_state").select("config").eq("agent_name", "Market Scanner").maybeSingle();
     const lastSymbols = (scanState?.config?.last_symbols || []) as string[];
     const symbols = lastSymbols.length > 0 ? lastSymbols.slice(0, 50) : FALLBACK_WATCHLIST;
 
@@ -36,12 +41,7 @@ serve(async (req) => {
     if (ALPACA_API_KEY && ALPACA_API_SECRET) {
       const newsRes = await fetch(
         `https://data.alpaca.markets/v1beta1/news?symbols=${symbols.join(",")}&limit=25`,
-        {
-          headers: {
-            "APCA-API-KEY-ID": ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
-          },
-        }
+        { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
       );
       if (newsRes.ok) {
         const newsData = await newsRes.json();
@@ -49,100 +49,61 @@ serve(async (req) => {
       }
     }
 
-    const newsContext = newsItems.length > 0
-      ? newsItems.map((n: any) => `[${n.symbols?.join(",")}] ${n.headline} - ${n.summary?.slice(0, 200) || ""}`).join("\n")
-      : "No recent news available. Provide general market sentiment based on current market conditions for: " + symbols.join(", ");
+    // ALGORITHMIC sentiment scoring — no AI call, saves API costs
+    const symbolScores: Record<string, { scores: number[], reasons: string[] }> = {};
+    let overallSum = 0;
+    let overallCount = 0;
 
-    // AI sentiment analysis
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "system",
-            content: `You are the Sentiment Analyst agent. Analyze news headlines and market context to produce sentiment scores for each symbol.
+    for (const news of newsItems) {
+      const text = `${news.headline || ""} ${news.summary || ""}`;
+      const score = scoreSentiment(text);
+      overallSum += score;
+      overallCount++;
 
-Score from -1.0 (extremely bearish) to 1.0 (extremely bullish). 0.0 is neutral.
-Also provide an overall market sentiment score.
-
-Be nuanced and conservative — avoid overreacting to single headlines.`,
-          },
-          {
-            role: "user",
-            content: `Analyze sentiment for these headlines:\n${newsContext}`,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "report_sentiment",
-              description: "Report sentiment analysis results",
-              parameters: {
-                type: "object",
-                properties: {
-                  overall_score: { type: "number", description: "Overall market sentiment -1 to 1" },
-                  symbol_sentiments: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        symbol: { type: "string" },
-                        score: { type: "number" },
-                        reasoning: { type: "string" },
-                      },
-                      required: ["symbol", "score", "reasoning"],
-                    },
-                  },
-                },
-                required: ["overall_score", "symbol_sentiments"],
-              },
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "report_sentiment" } },
-      }),
-    });
-
-    if (!aiResponse.ok) throw new Error(`AI gateway error: ${aiResponse.status}`);
-
-    const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    let sentimentResult = { overall_score: 0, symbol_sentiments: [] as any[] };
-
-    if (toolCall?.function?.arguments) {
-      sentimentResult = JSON.parse(toolCall.function.arguments);
+      for (const sym of (news.symbols || [])) {
+        if (!symbolScores[sym]) symbolScores[sym] = { scores: [], reasons: [] };
+        symbolScores[sym].scores.push(score);
+        symbolScores[sym].reasons.push(news.headline?.slice(0, 80) || "");
+      }
     }
 
-    // Store sentiment signals
-    const sentimentSignals = sentimentResult.symbol_sentiments
-      .filter((s: any) => Math.abs(s.score) >= 0.3) // Only meaningful sentiment
-      .map((s: any) => ({
-        symbol: s.symbol,
-        signal_type: s.score > 0 ? "sentiment_bullish" : "sentiment_bearish",
-        strength: Math.abs(s.score),
-        source_agent: "Sentiment Analyst",
-        metadata: { sentiment_score: s.score, reasoning: s.reasoning, news_count: newsItems.length },
-        expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-      }));
+    const overallScore = overallCount > 0 ? overallSum / overallCount : 0;
+
+    // Generate signals for strong sentiment
+    const sentimentSignals = Object.entries(symbolScores)
+      .map(([symbol, data]) => {
+        const avg = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
+        if (Math.abs(avg) < 0.3) return null;
+        return {
+          symbol,
+          signal_type: avg > 0 ? "sentiment_bullish" : "sentiment_bearish",
+          strength: Math.min(Math.abs(avg), 1),
+          source_agent: "Sentiment Analyst",
+          metadata: { sentiment_score: avg, reasoning: data.reasons.slice(0, 3).join("; "), news_count: data.scores.length },
+          expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+        };
+      })
+      .filter(Boolean);
 
     if (sentimentSignals.length > 0) {
       await supabase.from("signals").insert(sentimentSignals);
     }
 
+    // Log to analytics
+    await supabase.from("live_api_streams").insert({
+      source: "SentimentAnalyst",
+      symbol_or_context: "SENTIMENT_SCAN",
+      payload: { overall_score: overallScore, signals_generated: sentimentSignals.length, news_analyzed: newsItems.length },
+    });
+
     await supabase.from("agent_logs").insert({
       agent_name: "Sentiment Analyst",
       log_type: "info",
-      message: `Analyzed ${newsItems.length} news items. Overall sentiment: ${sentimentResult.overall_score.toFixed(2)}. Generated ${sentimentSignals.length} signals.`,
-      metadata: { overall_score: sentimentResult.overall_score, signal_count: sentimentSignals.length },
+      message: `Analyzed ${newsItems.length} news items. Overall sentiment: ${overallScore.toFixed(2)}. Generated ${sentimentSignals.length} signals. [NO AI — keyword-based]`,
+      metadata: { overall_score: overallScore, signal_count: sentimentSignals.length },
     });
 
-    // Display bullish score (normalized 0-1)
-    const bullishScore = ((sentimentResult.overall_score + 1) / 2).toFixed(2);
+    const bullishScore = ((overallScore + 1) / 2).toFixed(2);
     await supabase.from("agent_state").update({
       metric_value: bullishScore,
       metric_label: "bullish score",
@@ -152,14 +113,13 @@ Be nuanced and conservative — avoid overreacting to single headlines.`,
       status: "idle",
     }).eq("agent_name", "Sentiment Analyst");
 
-    return new Response(JSON.stringify({ success: true, sentiment: sentimentResult }), {
+    return new Response(JSON.stringify({ success: true, sentiment: { overall_score: overallScore, symbol_sentiments: Object.entries(symbolScores).map(([s, d]) => ({ symbol: s, score: d.scores.reduce((a, b) => a + b, 0) / d.scores.length })) } }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("Sentiment Analyst error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
