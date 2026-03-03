@@ -13,6 +13,24 @@ const ALPACA_DATA = "https://data.alpaca.markets";
 const GEMINI_DIRECT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 // AI Gateway with Gemini fallback to minimize costs
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {
+  let delay = initialDelay;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (error.message?.includes("429") && i < maxRetries - 1) {
+        console.log(`429 Rate Limit hit. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 2; // Exponential backoff
+        continue;
+      }
+      throw error;
+    }
+  }
+  return await fn(); // Should not reach here
+}
+
 async function callAI(lovableKey: string, geminiKey: string, messages: any[], jsonMode = true): Promise<string> {
   // Try Lovable AI first
   if (lovableKey) {
@@ -43,21 +61,23 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
   const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
   const userMsg = messages.find((m: any) => m.role === "user")?.content || "";
 
-  const geminiRes = await fetch(`${GEMINI_DIRECT_URL}?key=${geminiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: `${systemMsg}\n\n${userMsg}` }] }],
-      generationConfig: {
-        ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      },
-    }),
+  return await withRetry(async () => {
+    const geminiRes = await fetch(`${GEMINI_DIRECT_URL}?key=${geminiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${systemMsg}\n\n${userMsg}` }] }],
+        generationConfig: {
+          ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+        },
+      }),
+    });
+    if (!geminiRes.ok) throw new Error(`Gemini API error: ${geminiRes.status}`);
+    const geminiData = await geminiRes.json();
+    return geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
   });
-  if (!geminiRes.ok) throw new Error(`Gemini API error: ${geminiRes.status}`);
-  const geminiData = await geminiRes.json();
-  return geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 // ── WIDE UNIVERSE: 80+ diverse stocks across sectors ──
@@ -108,7 +128,7 @@ async function fetchSnapshots(symbols: string[], key: string, secret: string) {
         const data = await res.json();
         Object.assign(all, data);
       }
-    } catch {}
+    } catch { }
   }
   return all;
 }
@@ -211,7 +231,7 @@ serve(async (req) => {
 
     const lossReflection = losers.length > 0
       ? `RECENT LOSSES (${losers.length} trades, total: $${losers.reduce((s: number, t: any) => s + t.pnl, 0).toFixed(2)}):\n` +
-        losers.slice(0, 5).map((t: any) => `  ${t.side} ${t.symbol} x${t.qty} @ $${t.price} → P&L: $${t.pnl?.toFixed(2)} | Reason: ${t.reasoning || "unknown"}`).join("\n")
+      losers.slice(0, 5).map((t: any) => `  ${t.side} ${t.symbol} x${t.qty} @ $${t.price} → P&L: $${t.pnl?.toFixed(2)} | Reason: ${t.reasoning || "unknown"}`).join("\n")
       : "No recent losses — keep the streak going.";
 
     const winSummary = winners.length > 0
@@ -231,8 +251,8 @@ serve(async (req) => {
     }
     const diversificationNote = totalExposure > 0
       ? Object.entries(sectorExposure)
-          .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(1)}%`)
-          .join(", ")
+        .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(1)}%`)
+        .join(", ")
       : "No positions — fully diversifiable";
 
     // Money management: dynamic allocation
@@ -264,7 +284,7 @@ serve(async (req) => {
           headlines = (nd.results || []).slice(0, 10).map((n: any) => n.title);
         }
       }
-    } catch {}
+    } catch { }
 
     const brainPrompt = {
       model: "google/gemini-3-flash-preview",
@@ -539,10 +559,10 @@ Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from 
 
     const positionsBlock = freshPosArr.length > 0
       ? freshPosArr.map((p: any) => {
-          const uPnl = parseFloat(p.unrealized_pl || "0");
-          const emoji = uPnl >= 0 ? "🟢" : "🔴";
-          return `${emoji} **${p.symbol}** x${p.qty} → $${parseFloat(p.current_price).toFixed(2)} (${uPnl >= 0 ? "+" : ""}$${uPnl.toFixed(2)})`;
-        }).join("\n")
+        const uPnl = parseFloat(p.unrealized_pl || "0");
+        const emoji = uPnl >= 0 ? "🟢" : "🔴";
+        return `${emoji} **${p.symbol}** x${p.qty} → $${parseFloat(p.current_price).toFixed(2)} (${uPnl >= 0 ? "+" : ""}$${uPnl.toFixed(2)})`;
+      }).join("\n")
       : "No open positions";
 
     const executedBlock = executed.length > 0
@@ -560,9 +580,9 @@ Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from 
     // Sector exposure for display
     const sectorBlock = totalExposure > 0
       ? Object.entries(sectorExposure)
-          .sort((a, b) => b[1] - a[1])
-          .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(0)}%`)
-          .join(" | ")
+        .sort((a, b) => b[1] - a[1])
+        .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(0)}%`)
+        .join(" | ")
       : "Diversified (no positions)";
 
     const embeds = [

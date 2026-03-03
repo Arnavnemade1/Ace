@@ -26,6 +26,25 @@ export class BrainAgent {
     private apiKey = process.env.LOVABLE_API_KEY;
     private baseUrl = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
+    private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {
+        let delay = initialDelay;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await fn();
+            } catch (error: any) {
+                const is429 = error.response?.status === 429 || error.message?.includes('429');
+                if (is429 && i < maxRetries - 1) {
+                    console.log(`[Omni-Brain] 429 Rate Limit hit. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+                    await new Promise(r => setTimeout(r, delay));
+                    delay *= 2;
+                    continue;
+                }
+                throw error;
+            }
+        }
+        return await fn();
+    }
+
     async synthesize(context: BrainContext): Promise<{ action: 'BUY' | 'SELL' | 'HOLD'; reasoning: string; conviction: number }> {
         if (!this.apiKey) {
             return {
@@ -73,26 +92,30 @@ Current Symbol Holdings: ${context.portfolio.positions.find(p => p.symbol === co
 Evaluate this opportunity. Provide a definitive Action, Reasoning, and Conviction score.
 `;
 
-            const response = await axios.post(this.baseUrl, {
-                model: 'google/gemini-3-flash-preview',
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                response_format: { type: 'json_object' }
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 10000
+            const response = await this.withRetry(async () => {
+                return await axios.post(this.baseUrl, {
+                    model: 'google/gemini-3-flash-preview',
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt }
+                    ],
+                    response_format: { type: 'json_object' }
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${this.apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 10000
+                });
             });
 
-            const result = JSON.parse(response.data.choices[0].message.content);
+            const result = response.data.choices[0].message.content;
+            // Original code had JSON.parse which might be needed if string, but let's be safe
+            const parsedResult = typeof result === 'string' ? JSON.parse(result) : result;
             return {
-                action: result.action || 'HOLD',
-                reasoning: result.reasoning || 'No reasoning provided by AI.',
-                conviction: result.conviction || 0
+                action: parsedResult.action || 'HOLD',
+                reasoning: parsedResult.reasoning || 'No reasoning provided by AI.',
+                conviction: parsedResult.conviction || 0
             };
 
         } catch (error: any) {

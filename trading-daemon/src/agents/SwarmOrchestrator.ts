@@ -67,7 +67,8 @@ export class SwarmOrchestrator {
             // --- NEURAL PULSE: ADAPTIVE CYCLE DELAY ---
             const pulse = this.omni.getGlobalPulse();
             const urgency = Math.abs(pulse.newsSentiment - 0.5) + (pulse.weatherRisk > 0.3 ? 0.2 : 0);
-            const cycleDelay = !this.risk.isMarketOpen() ? 120000 : (urgency > 0.3 ? 30000 : 60000);
+            // Increase minimum delay from 60s/30s to 90s/60s to be safer with Gemini rate limits
+            const cycleDelay = !this.risk.isMarketOpen() ? 120000 : (urgency > 0.3 ? 60000 : 90000);
 
             console.log(`Neural Pulse: Next thought in ${cycleDelay / 1000}s (Urgency: ${urgency.toFixed(2)})`);
 
