@@ -165,6 +165,21 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY && !GEMINI_API_KEY) throw new Error("Missing AI keys (need LOVABLE_API_KEY or GEMINI_API_KEY)");
 
     // ═══════════════════════════════════════════════════
+    // 0. CHECK DISCORD RATE LIMIT (30 MIN)
+    // ═══════════════════════════════════════════════════
+    const { data: orchestratorState } = await supabase
+      .from("agent_state")
+      .select("config")
+      .eq("agent_name", "Swarm Orchestrator")
+      .maybeSingle();
+
+    const lastDiscordAt = orchestratorState?.config?.last_discord_at
+      ? new Date(orchestratorState.config.last_discord_at).getTime()
+      : 0;
+    const timeSinceDiscord = Date.now() - lastDiscordAt;
+    const shouldSendDiscord = timeSinceDiscord >= 30 * 60 * 1000; // 30 minutes
+
+    // ═══════════════════════════════════════════════════
     // 1. FETCH FULL ACCOUNT STATE
     // ═══════════════════════════════════════════════════
     const [account, positions, openOrders, clock] = await Promise.all([
@@ -261,9 +276,17 @@ serve(async (req) => {
 
     // Money management: dynamic allocation
     const bpRatio = buyingPower / Math.max(equity, 1);
-    const allocationPct = bpRatio > 0.8 ? 0.05 : bpRatio > 0.4 ? 0.03 : 0.015;
+    let allocationPct = bpRatio > 0.8 ? 0.05 : bpRatio > 0.4 ? 0.03 : 0.015;
+
+    // STRICT RISK MANAGEMENT: Cut allocation on negative daily PnL
+    if (dailyPnl < 0) {
+      allocationPct = allocationPct * 0.25; // Slash by 75% on down days
+    }
+
     const maxAllocation = equity * allocationPct;
     const minCashBuffer = equity * 0.15;
+    const maxOpenPositions = 15; // Hard cap on number of positions
+    const isAtPositionCap = posArr.length >= maxOpenPositions;
 
     // ═══════════════════════════════════════════════════
     // 5. AI BRAIN: Multi-trade, diversification-aware
@@ -295,79 +318,61 @@ serve(async (req) => {
       messages: [
         {
           role: "system",
-          content: `You are the Omni-Brain of ACE_OS, an autonomous paper trading system on Alpaca.
-You make REAL trades with real paper money. You must be SMART, STRATEGIC, and DIVERSIFIED.
+          content: `You are the Omni-Brain of ACE_OS, an elite algorithmic and macro-aware trading system on Alpaca.
+You make REAL trades with real money. You must be RUTHLESSLY STRATEGIC, DIVERSIFIED, and CONTEXT-AWARE.
 
-═══ GEOPOLITICAL & MACRO AWARENESS ═══
-You MUST factor in current world events when trading. Examples:
-- Wars/conflicts (e.g. Middle East tensions, Iran situation) → BOOST defense stocks (LMT, RTX, GD, NOC, BA), energy (XOM, CVX, OXY)
-- Interest rate decisions → affects financials (JPM, BAC, GS), real estate, growth stocks
-- AI/tech regulation → impacts NVDA, GOOGL, META, PLTR, MSFT
-- Trade wars/tariffs → watch supply chain-heavy companies (AAPL, TSLA, NKE)
-- Election cycles → watch healthcare, defense, energy sectors
-- Crypto regulation → impacts COIN, MSTR, crypto-adjacent
-- Weather events → energy prices, insurance, agriculture
-- Pandemic/health scares → pharma (PFE, MRNA), health (UNH, JNJ)
-ALWAYS connect current headlines to sector impacts. Think like a macro strategist.
+═══ MARKET MODE & GEOPOLITICS ═══
+Market is currently: ${marketOpen ? "OPEN (DAY TRADING MODE)" : "CLOSED (PREP MODE)"}.
+${marketOpen ? "DAY TRADING FOCUS: Look for volatile intraday movers, breakout setups, and quick 1-5% momentum scalps. React instantly to real-time news." : "PREP MODE: Analyze end-of-day data and queue limit orders for tomorrow's open. Set up for gap-ups or overnight momentum carryover."}
 
-═══ CORE PRINCIPLES ═══
-1. DIVERSIFICATION: Never over-concentrate in one sector. Spread across TECH, SEMIS, FINANCE, ENERGY, HEALTH, etc.
-   Current sector exposure: ${diversificationNote}
-   If any sector > 30% of portfolio, AVOID buying more in that sector.
+GEOPOLITICAL CATALYSTS: You MUST trade based on major world events.
+- Wars/Major Conflicts → Target defense (LMT, RTX) and energy/oil (XOM, OXY).
+- Fed Rate Hikes/Cuts → Trade financials (JPM, GS) and tech multiples.
+- AI & Tech Wars → Watch NVDA, GOOGL, MSFT, PLTR flows.
+- Regulatory Shifts/Tariffs → Watch crypto (COIN), supply chain heavily hit retail/tech.
 
-2. MONEY MANAGEMENT:
-   - Allocation: ${(allocationPct * 100).toFixed(1)}% per trade ($${maxAllocation.toFixed(0)} max)
-   - Keep 15% cash buffer at all times
-   - Current BP ratio: ${(bpRatio * 100).toFixed(0)}%
-   - ${bpRatio > 0.8 ? "HIGH BP: Be aggressive, open 2-3 positions across different sectors" : bpRatio > 0.4 ? "MODERATE BP: Pick 1-2 best opportunities in underweight sectors" : "LOW BP: Only highest conviction, or consider trimming losers"}
+═══ CORE PRINCIPLES & RISK ═══
+1. PORTFOLIO CAPS: Current positions: ${posArr.length}/${maxOpenPositions}. ${isAtPositionCap ? "⚠️ AT MAX CAPACITY. You CANNOT BUY new tickers. You may ONLY SELL or hold." : ""}
+2. EXPOSURE: ${diversificationNote}. NEVER let a single sector cross 30%.
+3. RISK MANAGEMENT: Daily P&L is ${dailyPnl < 0 ? "NEGATIVE. Capital preservation is active. Allocation slashed." : "positive. Normal allocation active."}
+   - Max spend per trade: $${maxAllocation.toFixed(0)}.
+   - Need >= 0.8 conviction to buy (strict).
 
-3. LOSS REFLECTION — Learn from mistakes:
+4. LOSS REFLECTION:
    ${lossReflection}
    ${winSummary}
-   Total realized P&L (last 20 trades): $${totalRealized.toFixed(2)}
-   → If losses are from one sector/pattern, AVOID repeating it.
-   → If a held position is down >5%, consider cutting losses.
-   → If a held position is up >8%, consider taking partial profit.
-
-4. HYPER-ANALYTICS (Market ${marketOpen ? "OPEN — FULL SCAN MODE" : "CLOSED — prep mode"}):
-   ${marketOpen ? "Scan ALL data aggressively. Look for intraday momentum, volume surges, breakouts." : "Queue GTC limit orders for tomorrow's open. Focus on overnight gap setups."}
+   Avoid repeating recent losing patterns. Cut losers down >5%, trim winners up >8%.
 
 ═══ DECISION FORMAT ═══
-Return a JSON object with an array of up to 3 trades:
+Return valid JSON ONLY (no markdown blocks inside the JSON):
 {
   "trades": [
-    {"action": "BUY"|"SELL", "symbol": "TICKER", "qty": number, "reasoning": "detailed why including geopolitical factors", "conviction": 0.0-1.0}
+    {"action": "BUY"|"SELL", "symbol": "TICKER", "qty": number, "reasoning": "Be SPECIFIC. Cite exact news, % moves, or macro events driving this. 'Stock is up' is rejected.", "conviction": 0.0-1.0}
   ],
-  "market_outlook": "1-2 sentence market assessment factoring geopolitics",
-  "portfolio_health": "1-2 sentence portfolio review",
-  "loss_lessons": "what you learned from recent losses"
+  "market_outlook": "1-2 sentence macro and geopolitical summary",
+  "portfolio_health": "1-2 sentence analysis of current allocations",
+  "thesis": "Your primary strategic thesis for this precise moment."
 }
 
-- Conviction must be >= 0.7 to execute
-- Calculate qty: floor(allocation / price)
-- If SELLING, only sell symbols you HOLD
-- Prefer ${marketOpen ? "MARKET" : "LIMIT (GTC)"} orders
-- NEVER buy a symbol you already hold (no doubling down) unless conviction > 0.9
-- If nothing is compelling, return empty trades array with reasoning`
+- Calculate qty: floor(allocation / price).
+- NEVER buy if you already hold the ticker. Always diversify.
+- If no high-conviction (>0.8) trades exist, return an empty "trades" array.`
         },
         {
           role: "user",
-          content: `═══ LIVE PORTFOLIO ═══
-Equity: $${equity.toFixed(2)} | Cash: $${cash.toFixed(2)} | BP: $${buyingPower.toFixed(2)}
+          content: `═══ LIVE STATE ═══
+Equity: $${equity.toFixed(2)} | Cash: $${cash.toFixed(2)}
 Daily P&L: $${dailyPnl.toFixed(2)} (${dailyPnlPct.toFixed(2)}%)
-Positions (${posArr.length}):
+Positions (${posArr.length}/${maxOpenPositions}):
 ${positionsSummary}
 
-Open Orders: ${ordersArr.length}
-Market: ${marketOpen ? "OPEN" : "CLOSED"}
-
-═══ MARKET SCAN (${topMovers.length} top movers from ${scanSymbols.length} scanned) ═══
+═══ MARKET SCAN (${topMovers.length} top movers) ═══
 ${marketContext}
 
-═══ NEWS ═══
-${headlines.length > 0 ? headlines.map(h => `• ${h}`).join("\n") : "No headlines"}
+═══ NEWS HEADLINES ═══
+${headlines.length > 0 ? headlines.map(h => `• ${h}`).join("\n") : "None"}
 
-Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from losses, and factor in geopolitical events.`
+Execute strategy.`
         }
       ],
     };
@@ -397,9 +402,15 @@ Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from 
       const conviction = trade.conviction || 0;
       let tradeQty = Math.max(1, Math.min(trade.qty || 1, 50));
 
-      // Skip low conviction
-      if (conviction < 0.7) {
-        executionResults.push({ symbol: sym, status: "SKIPPED", reason: `Low conviction: ${conviction}` });
+      // Skip low conviction (strictly enforced)
+      if (conviction < 0.8 && action === "BUY") {
+        executionResults.push({ symbol: sym, status: "SKIPPED", reason: `Low conviction for BUY: ${conviction}` });
+        continue;
+      }
+
+      // Enforce position cap strictly
+      if (action === "BUY" && isAtPositionCap && !heldSymbols.includes(sym)) {
+        executionResults.push({ symbol: sym, status: "SKIPPED", reason: "Max position cap reached" });
         continue;
       }
 
@@ -545,84 +556,81 @@ Make your trading decisions. Remember: DIVERSIFY, manage money well, learn from 
       agent_name: "Swarm Orchestrator",
       log_type: "decision",
       message: `Cycle complete: ${executionResults.length} actions | Scanned ${scanSymbols.length} symbols | Mode: ${marketOpen ? "HYPER" : "PREP"}`,
-      reasoning: brain.market_outlook || "",
-      metadata: { executionResults, brain_summary: { outlook: brain.market_outlook, health: brain.portfolio_health, lessons: brain.loss_lessons } }
+      reasoning: brain.thesis || brain.market_outlook || "",
+      metadata: { executionResults, brain_summary: { outlook: brain.market_outlook, health: brain.portfolio_health, thesis: brain.thesis } }
     });
 
     // ═══════════════════════════════════════════════════
-    // 9. CONSOLIDATED 30-MIN DISCORD BRIEF (ONLY OUTPUT)
+    // 9. CONSOLIDATED DISCORD BRIEF (Rate Limited)
     // ═══════════════════════════════════════════════════
-    const executed = executionResults.filter(r => r.status === "EXECUTED");
-    const skipped = executionResults.filter(r => r.status === "SKIPPED");
-    const failed = executionResults.filter(r => r.status === "FAILED");
+    if (shouldSendDiscord) {
+      const executed = executionResults.filter(r => r.status === "EXECUTED");
+      const skipped = executionResults.filter(r => r.status === "SKIPPED");
+      const failed = executionResults.filter(r => r.status === "FAILED");
 
-    const freshEquity = freshAcc ? parseFloat(freshAcc.equity) : equity;
-    const freshCash = freshAcc ? parseFloat(freshAcc.cash) : cash;
-    const freshBP = freshAcc ? parseFloat(freshAcc.buying_power) : buyingPower;
-    const freshPosArr = Array.isArray(freshPos) ? freshPos : posArr;
+      const freshEquity = freshAcc ? parseFloat(freshAcc.equity) : equity;
+      const freshCash = freshAcc ? parseFloat(freshAcc.cash) : cash;
+      const freshBP = freshAcc ? parseFloat(freshAcc.buying_power) : buyingPower;
+      const freshPosArr = Array.isArray(freshPos) ? freshPos : posArr;
 
-    const positionsBlock = freshPosArr.length > 0
-      ? freshPosArr.map((p: any) => {
-        const uPnl = parseFloat(p.unrealized_pl || "0");
-        const emoji = uPnl >= 0 ? "🟢" : "🔴";
-        return `${emoji} **${p.symbol}** x${p.qty} → $${parseFloat(p.current_price).toFixed(2)} (${uPnl >= 0 ? "+" : ""}$${uPnl.toFixed(2)})`;
-      }).join("\n")
-      : "No open positions";
+      const executedBlock = executed.length > 0
+        ? executed.map(e => `${e.action === "BUY" ? "🟢 BUY" : "🔴 SELL"} **${e.symbol}** x${e.qty} @ $${(e.fill || 0).toFixed(2)}${e.pnl ? ` (P&L: $${e.pnl.toFixed(2)})` : ""}`).join("\n")
+        : "No trades executed";
 
-    const executedBlock = executed.length > 0
-      ? executed.map(e => `${e.action === "BUY" ? "🟢 BUY" : "🔴 SELL"} **${e.symbol}** x${e.qty} @ $${(e.fill || 0).toFixed(2)}${e.pnl ? ` (P&L: $${e.pnl.toFixed(2)})` : ""}`).join("\n")
-      : "No trades executed";
+      const skippedBlock = skipped.length > 0
+        ? skipped.map(s => `⏭️ ${s.symbol}: ${s.reason}`).join("\n")
+        : "";
 
-    const skippedBlock = skipped.length > 0
-      ? skipped.map(s => `⏭️ ${s.symbol}: ${s.reason}`).join("\n")
-      : "";
+      const topMoversBlock = (movers as any[]).slice(0, 8).map((m: any) =>
+        `${m.changePct >= 0 ? "📈" : "📉"} **${m.sym}** ${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(2)}% ($${m.price.toFixed(2)})`
+      ).join("\n");
 
-    const topMoversBlock = (movers as any[]).slice(0, 8).map((m: any) =>
-      `${m.changePct >= 0 ? "📈" : "📉"} **${m.sym}** ${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(2)}% ($${m.price.toFixed(2)})`
-    ).join("\n");
+      // Sector exposure for display
+      const sectorBlock = totalExposure > 0
+        ? Object.entries(sectorExposure)
+          .sort((a, b) => b[1] - a[1])
+          .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(0)}%`)
+          .join(" | ")
+        : "Diversified (no positions)";
 
-    // Sector exposure for display
-    const sectorBlock = totalExposure > 0
-      ? Object.entries(sectorExposure)
-        .sort((a, b) => b[1] - a[1])
-        .map(([sec, val]) => `${sec}: ${((val / totalExposure) * 100).toFixed(0)}%`)
-        .join(" | ")
-      : "Diversified (no positions)";
+      const aiTradesLog = trades.map((t: any) => `**${t.action} ${t.symbol}** (Conviction: ${t.conviction})\n*Reasoning:* ${t.reasoning}`).join("\n\n");
 
-    const embeds = [
-      {
-        title: `📊 ACE_OS — 30 Minute Intelligence Brief`,
-        description: [
-          `**Mode:** ${marketOpen ? "🔥 HYPER ANALYTICS (Market Open)" : "🌙 Prep Mode (Market Closed)"}`,
-          `**Symbols Scanned:** ${scanSymbols.length}/${ALL_SYMBOLS.length}`,
-          "",
-          "━━━ **PORTFOLIO** ━━━",
-          `💰 Equity: **$${freshEquity.toFixed(2)}** | Cash: $${freshCash.toFixed(2)} | BP: $${freshBP.toFixed(2)}`,
-          `📊 Daily P&L: **${dailyPnl >= 0 ? "+" : ""}$${dailyPnl.toFixed(2)}** (${dailyPnlPct.toFixed(2)}%)`,
-          `🏗️ Positions: ${freshPosArr.length} | Sector Exposure: ${sectorBlock}`,
-          "",
-          "━━━ **POSITIONS** ━━━",
-          positionsBlock,
-          "",
-          "━━━ **TRADES THIS CYCLE** ━━━",
-          executedBlock,
-          skippedBlock ? `\n━━━ **SKIPPED** ━━━\n${skippedBlock}` : "",
-          "",
-          "━━━ **TOP MOVERS** ━━━",
-          topMoversBlock,
-          "",
-          "━━━ **AI ASSESSMENT** ━━━",
-          `📈 **Outlook:** ${brain.market_outlook || "Analyzing..."}`,
-          `🏥 **Portfolio Health:** ${brain.portfolio_health || "Stable"}`,
-          `📝 **Loss Lessons:** ${brain.loss_lessons || "None yet"}`,
-        ].filter(Boolean).join("\n"),
-        color: dailyPnl >= 0 ? 0x00ff41 : 0xff4444,
-        footer: { text: `ACE_OS Omni-Brain | Next brief in ~30 min` },
-        timestamp: new Date().toISOString(),
-      }
-    ];
+      const embeds = [
+        {
+          title: `📊 ACE_OS — Intelligence Brief`,
+          description: [
+            `**Mode:** ${marketOpen ? "🔥 DAY TRADING (Market Open)" : "🌙 PREP MODE (Market Closed)"}`,
+            `**Symbols Scanned:** ${scanSymbols.length}/${ALL_SYMBOLS.length}`,
+            "",
+            "━━━ **PORTFOLIO** ━━━",
+            `💰 Equity: **$${freshEquity.toFixed(2)}** | BP: $${freshBP.toFixed(2)}`,
+            `📊 Daily P&L: **${dailyPnl >= 0 ? "+" : ""}$${dailyPnl.toFixed(2)}** (${dailyPnlPct.toFixed(2)}%)`,
+            `🏗️ Positions: ${freshPosArr.length}/${maxOpenPositions} | Sector Exposure: ${sectorBlock}`,
+            "",
+            "━━━ **TRADES THIS CYCLE** ━━━",
+            executedBlock,
+            skippedBlock ? `\n━━━ **SKIPPED** ━━━\n${skippedBlock}` : "",
+            "",
+            "━━━ **AI THESIS & REASONING** ━━━",
+            `🧠 **Core Thesis:** ${brain.thesis || "Monitoring for setups."}`,
+            "",
+            aiTradesLog ? `**Trade Justifications:**\n${aiTradesLog}` : "*No trade justifications generated this cycle.*",
+          ].filter(Boolean).join("\n"),
+          color: dailyPnl >= 0 ? 0x00ff41 : 0xff4444,
+          footer: { text: `ACE_OS Omni-Brain | Next brief in ~30 min` },
+          timestamp: new Date().toISOString(),
+        }
+      ];
 
-    await sendDiscordBrief(embeds);
+      await sendDiscordBrief(embeds);
+
+      await supabase.from("agent_state").update({
+        config: {
+          ...(orchestratorState?.config || {}),
+          last_discord_at: new Date().toISOString()
+        }
+      }).eq("agent_name", "Swarm Orchestrator");
+    }
 
     return new Response(JSON.stringify({
       success: true,
