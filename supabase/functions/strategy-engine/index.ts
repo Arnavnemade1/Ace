@@ -5,71 +5,20 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-const MIN_MINUTES_BETWEEN_TRADES = 30;
-const MAX_TRADES_PER_DAY = 5;
-const MIN_BUYING_POWER = 100;
-const CASH_BUFFER_PCT = 0.25;
-const MAX_ALLOCATION_PCT = 0.02;
-const MAX_OPEN_POSITIONS = 8;
-const LOSS_RECOVERY_PNL_PCT = -0.01;
-const LOSS_RECOVERY_MAX_DRAWDOWN = 0.03;
-const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
-async function getMarketClock(key?: string, secret?: string) {
-  if (!key || !secret) return null;
-  try {
-    const res = await fetch("https://paper-api.alpaca.markets/v2/clock", {
-      headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
+const MAX_ALLOCATION_PCT = 0.02;
+const CASH_BUFFER_PCT = 0.25;
+const LOW_RISK_SYMBOLS = new Set(["SPY", "QQQ", "VTI", "IWM", "DIA", "TLT", "SHY", "USFR"]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Strategy Engine");
-
-    const { data: directiveState } = await supabase
-      .from("agent_state")
-      .select("config")
-      .eq("agent_name", "Orchestrator")
-      .maybeSingle();
-
-    const directive = directiveState?.config || {};
-    const strategyBias = String(directive.strategy_bias || "balanced");
-    const riskProfile = String(directive.risk_profile || "standard");
-    const tradingEnabled = directive.trading_enabled !== false;
-
-    if (!tradingEnabled) {
-      await supabase.from("agent_logs").insert({
-        agent_name: "Strategy Engine",
-        log_type: "info",
-        message: "Trading paused via Discord directive. No new recommendations.",
-        reasoning: `Directive: trading_enabled=false | strategy_bias=${strategyBias} | risk_profile=${riskProfile}`,
-      });
-      return new Response(JSON.stringify({ success: true, decisions: [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const minStrength = strategyBias === "aggressive" ? 0.45 : strategyBias === "conservative" ? 0.9 : 0.7;
-    const minStrengthRecovery = Math.max(minStrength, 0.85);
-    const allocationMultiplier = strategyBias === "aggressive" ? 1.15 : strategyBias === "conservative" ? 0.75 : 1;
-    const maxTradesPerCycle = signals?.length || 25;
 
     // Fetch unacted signals
     const { data: signals } = await supabase
@@ -80,34 +29,13 @@ serve(async (req) => {
       .order("strength", { ascending: false })
       .limit(30);
 
-    // Fetch portfolio state
+    // Fetch portfolio
     const { data: portfolio } = await supabase.from("portfolio_state").select("*").limit(1).single();
 
-    // Fetch recent trades for context
-    const { data: recentTrades } = await supabase
-      .from("trades")
-      .select("*")
-      .order("executed_at", { ascending: false })
-      .limit(10);
-
-    const recentlyTradedSymbols = new Set();
-
-    // Fetch real prices from Alpaca for sizing
-    let snapshots: Record<string, any> = {};
-    if (ALPACA_API_KEY && ALPACA_API_SECRET) {
-      const symbols = [...new Set((signals || []).map(s => s.symbol))];
-      if (symbols.length > 0) {
-        const snapRes = await fetch(
-          `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${symbols.join(",")}`,
-          { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
-        );
-        if (snapRes.ok) snapshots = await snapRes.json();
-      }
-    }
-
-    const clock = await getMarketClock(ALPACA_API_KEY || undefined, ALPACA_API_SECRET || undefined);
     let account: any = null;
     let positions: any[] = [];
+    let snapshots: Record<string, any> = {};
+
     if (ALPACA_API_KEY && ALPACA_API_SECRET) {
       const [accRes, posRes] = await Promise.all([
         fetch("https://paper-api.alpaca.markets/v2/account", {
@@ -119,181 +47,83 @@ serve(async (req) => {
       ]);
       if (accRes.ok) account = await accRes.json();
       if (posRes.ok) positions = await posRes.json();
+
+      // Fetch prices for signal symbols
+      const symbols = [...new Set((signals || []).map(s => s.symbol))];
+      if (symbols.length > 0) {
+        const snapRes = await fetch(
+          `https://data.alpaca.markets/v2/stocks/snapshots?symbols=${symbols.join(",")}`,
+          { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
+        );
+        if (snapRes.ok) snapshots = await snapRes.json();
+      }
     }
 
     if (!signals || signals.length === 0) {
-      await supabase.from("agent_logs").insert({
-        agent_name: "Strategy Engine",
-        log_type: "info",
-        message: "No actionable signals found",
-      });
-      return new Response(JSON.stringify({ success: true, decisions: [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      await supabase.from("agent_logs").insert({ agent_name: "Strategy Engine", log_type: "info", message: "No actionable signals found" });
+      await supabase.from("agent_state").update({ status: "idle", updated_at: new Date().toISOString() }).eq("agent_name", "Strategy Engine");
+      return new Response(JSON.stringify({ success: true, decisions: [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    const signalSummary = signals.map((s) => {
-      const snap = snapshots[s.symbol];
-      const price = snap?.latestTrade?.p || "unknown";
-      return `${s.symbol}: ${s.signal_type} (strength: ${s.strength}, price: $${price}) - ${s.metadata?.reasoning || "No reasoning"}`;
-    }).join("\n");
 
     const portfolioValue = Number(account?.equity || portfolio?.total_value || 100000);
     const cash = Number(account?.cash || portfolio?.cash || 100000);
     const buyingPower = Number(account?.buying_power || portfolio?.buying_power || cash);
-    const currentPositions = positions.length > 0 ? positions : (portfolio?.positions || []);
+    const heldSymbols = new Set((positions || []).map((p: any) => p.symbol));
     const maxAllocation = portfolioValue * MAX_ALLOCATION_PCT;
-    const dailyPnl = account?.last_equity
-      ? Number(account.equity) - Number(account.last_equity)
-      : Number(portfolio?.daily_pnl || 0);
-    const dailyPnlPct = account?.last_equity
-      ? dailyPnl / Number(account.last_equity || 1)
-      : (portfolioValue ? dailyPnl / portfolioValue : 0);
-    const maxDrawdown = Number(portfolio?.max_drawdown || 0);
-    const forceLowRisk = riskProfile === "minimal";
-    const lossRecoveryMode = forceLowRisk || dailyPnlPct <= LOSS_RECOVERY_PNL_PCT || maxDrawdown >= LOSS_RECOVERY_MAX_DRAWDOWN;
-    const effectiveMaxAllocation = lossRecoveryMode
-      ? portfolioValue * 0.01
-      : Math.min(portfolioValue * 0.03, maxAllocation * allocationMultiplier);
+    const dailyPnl = account?.last_equity ? Number(account.equity) - Number(account.last_equity) : Number(portfolio?.daily_pnl || 0);
+    const dailyPnlPct = portfolioValue > 0 ? dailyPnl / portfolioValue : 0;
+    const lossRecovery = dailyPnlPct < -0.01;
 
-    const portfolioSummary = `Cash: $${cash}, Total Value: $${portfolioValue}, Buying Power: $${buyingPower}, Open Positions: ${currentPositions.length}, Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%), Directive: ${strategyBias}/${riskProfile}`;
+    // ALGORITHMIC strategy selection — no AI call, saves API costs
+    // Pick top signals by strength, apply budget constraints
+    const decisions: any[] = [];
+    const effectiveAlloc = lossRecovery ? portfolioValue * 0.01 : maxAllocation;
 
-    const tradeHistory = recentTrades?.map((t) =>
-      `${t.side} ${t.qty} ${t.symbol} @ $${t.price} (${t.strategy})`
-    ).join("\n") || "No recent trades";
+    for (const sig of signals) {
+      if (decisions.length >= 3) break;
+      
+      const strength = Number(sig.strength || 0);
+      const minStrength = lossRecovery ? 0.85 : 0.7;
+      if (strength < minStrength) continue;
 
-    // AI decides which signals to act on — selective
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are the Strategy Engine of a cautious autonomous paper trading system. You run three strategies:
-1. Momentum: Follow strong trends (signal strength > 0.7)
-2. Mean Reversion: Fade overextended moves with confirmation
-3. Volatility Arbitrage: Trade vol spikes only if liquidity is strong
+      // Determine side from signal type
+      const isBuy = sig.signal_type.includes("long") || sig.signal_type.includes("bullish") || sig.signal_type === "breakout";
+      const isSell = sig.signal_type.includes("short") || sig.signal_type.includes("bearish") || sig.signal_type === "breakdown";
+      
+      if (!isBuy && !isSell) continue;
+      if (isSell && !heldSymbols.has(sig.symbol)) continue;
+      if (isBuy && cash < portfolioValue * CASH_BUFFER_PCT) continue;
+      if (lossRecovery && isBuy && !LOW_RISK_SYMBOLS.has(sig.symbol)) continue;
 
-IMPORTANT RULES:
-- Be selective and avoid overtrading. If signals are weak, return no trades.
-- Max 1 trade per cycle.
-- Prefer signals with strength >= ${minStrength}.
-- Respect buying power and avoid over-sizing.
-- Consider existing positions to avoid over-concentration.
-- Calculate qty based on real prices: qty = floor(allocation / price), allocation <= ${MAX_ALLOCATION_PCT * 100}% of equity.
-- LOSS RECOVERY MODE: if active, only consider low-risk symbols (${Array.from(LOW_RISK_SYMBOLS).join(", ")}) and size at 1% of equity.
-- DISCORD DIRECTIVE: strategy_bias=${strategyBias}, risk_profile=${riskProfile}. Obey risk_profile; if minimal, restrict to low-risk symbols and reduce size.`,
-          },
-          {
-            role: "user",
-            content: `Active Signals:\n${signalSummary}\n\nPortfolio:\n${portfolioSummary}\n\nMode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}\n\nMarket Clock: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next Open: ${clock?.next_open || "unknown"} | Next Close: ${clock?.next_close || "unknown"}\n\nRecent Trades:\n${tradeHistory}\n\nRecommend trades. If market is closed, still recommend if you would queue a GTC limit order at open.`,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "recommend_trades",
-              description: "Recommend trades to execute",
-              parameters: {
-                type: "object",
-                properties: {
-                  trades: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        symbol: { type: "string" },
-                        side: { type: "string", enum: ["BUY", "SELL"] },
-                        qty: { type: "number" },
-                        strategy: { type: "string" },
-                        reasoning: { type: "string" },
-                      },
-                      required: ["symbol", "side", "qty", "strategy", "reasoning"],
-                    },
-                  },
-                },
-                required: ["trades"],
-              },
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "recommend_trades" } },
-      }),
-    });
-
-    if (!aiResponse.ok) throw new Error(`AI gateway error: ${aiResponse.status}`);
-
-    const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    let decisions: any[] = [];
-
-    if (toolCall?.function?.arguments) {
-      const parsed = JSON.parse(toolCall.function.arguments);
-      decisions = (parsed.trades || []).slice(0, maxTradesPerCycle);
-    }
-
-    // Budget-aware filtering: only BUY if strength is high and allocation fits live price
-    const signalStrengthBySymbol = new Map((signals || []).map((s) => [s.symbol, Number(s.strength || 0)]));
-    const heldSymbols = new Set((currentPositions || []).map((p: any) => p.symbol));
-    decisions = decisions.filter((d) => {
-      if (d.side !== "BUY") return true;
-      const strength = signalStrengthBySymbol.get(d.symbol) || 0;
-      if (strength < minStrength) return false;
-      const snap = snapshots[d.symbol];
+      const snap = snapshots[sig.symbol];
       const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
-      if (!price) return false;
-      const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
-      d.qty = Math.min(d.qty, maxQty);
-      return d.qty >= 1;
-    });
-    decisions = decisions.filter((d) => {
-      if (d.side === "SELL") return heldSymbols.has(d.symbol);
-      return true;
-    });
+      if (!price) continue;
 
-    // Deterministic fallback if LLM returns no trades and strong signals exist
-    if (decisions.length === 0) {
-      const ordered = [...signals].sort((a, b) => Number(b.strength || 0) - Number(a.strength || 0));
-      const picked: any[] = [];
-      for (const s of ordered) {
-        if (picked.length >= maxTradesPerCycle) break;
-        const strength = Number(s.strength || 0);
-        if (strength < minStrength) continue;
-        if (s.signal_type === "SELL" && !heldSymbols.has(s.symbol)) continue;
-        const snap = snapshots[s.symbol];
-        const price = snap?.latestTrade?.p || snap?.dailyBar?.c;
-        if (!price) continue;
-        const maxQty = Math.max(1, Math.floor(effectiveMaxAllocation / price));
-        const qty = Math.max(1, Math.min(maxQty, 1));
-        picked.push({
-          symbol: s.symbol,
-          side: s.signal_type === "SELL" ? "SELL" : "BUY",
-          qty,
-          strategy: "Deterministic Fallback",
-          reasoning: s.metadata?.reasoning || s.metadata?.analysis || s.reasoning || "Fallback trade based on top-ranked signal strength.",
-        });
-      }
-      if (picked.length > 0) {
-        decisions = picked;
-        await supabase.from("agent_logs").insert({
-          agent_name: "Strategy Engine",
-          log_type: "decision",
-          message: `Fallback trades selected: ${picked.map((p) => `${p.side} ${p.symbol}`).join(", ")}`,
-          reasoning: picked.map((p) => `${p.symbol}: ${p.reasoning}`).join(" | "),
-        });
-      }
+      const qty = isBuy ? Math.max(1, Math.floor(effectiveAlloc / price)) : Math.min(
+        parseInt((positions.find((p: any) => p.symbol === sig.symbol)?.qty || "0")),
+        Math.max(1, Math.floor(effectiveAlloc / price))
+      );
+      if (qty < 1) continue;
+
+      // Determine strategy
+      let strategy = "Momentum";
+      if (sig.signal_type.includes("mean_reversion")) strategy = "Mean Reversion";
+      else if (sig.signal_type.includes("sentiment")) strategy = "Sentiment";
+      else if (sig.signal_type.includes("breakout") || sig.signal_type.includes("breakdown")) strategy = "Breakout";
+
+      decisions.push({
+        symbol: sig.symbol,
+        side: isBuy ? "BUY" : "SELL",
+        qty,
+        strategy,
+        reasoning: sig.metadata?.reasoning || `${strategy} signal with strength ${strength.toFixed(2)}`,
+      });
     }
 
-    // Mark signals as acted on only for decisions
+    // Mark signals as acted on
     if (decisions.length > 0) {
       const actedIds = decisions
-        .map((d) => signals.find((s) => s.symbol === d.symbol && String(s.signal_type).toUpperCase() === d.side))
+        .map(d => signals.find(s => s.symbol === d.symbol))
         .filter(Boolean)
         .map((s: any) => s.id);
       if (actedIds.length > 0) {
@@ -301,58 +131,27 @@ IMPORTANT RULES:
       }
     }
 
-    // Store decisions as pending trades (include price estimate so risk can budget)
-    for (const decision of decisions) {
-      const qty = Math.max(1, Math.round(decision.qty));
-      // use snapshot price if available, otherwise fall back to 0
-      const snap = snapshots[decision.symbol];
-      const estPrice = snap?.latestTrade?.p || snap?.dailyBar?.c || 0;
-      const totalVal = estPrice > 0 ? estPrice * qty : 0;
+    // Store as pending trades
+    for (const d of decisions) {
+      const snap = snapshots[d.symbol];
+      const price = snap?.latestTrade?.p || snap?.dailyBar?.c || 0;
       await supabase.from("trades").insert({
-        symbol: decision.symbol,
-        side: decision.side,
-        qty,
-        price: estPrice,
-        total_value: totalVal,
-        agent: "Strategy Engine",
-        strategy: decision.strategy,
-        reasoning: decision.reasoning,
-        status: "pending",
+        symbol: d.symbol, side: d.side, qty: d.qty, price,
+        total_value: price * d.qty, agent: "Strategy Engine",
+        strategy: d.strategy, reasoning: d.reasoning, status: "pending",
       });
     }
 
     await supabase.from("agent_logs").insert({
-      agent_name: "Strategy Engine",
-      log_type: "decision",
-      message: `Processed ${signals.length} signals → ${decisions.length} trades recommended`,
-      reasoning: decisions.map((d) => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; ") || "No trades recommended.",
-      metadata: { signal_count: signals.length, trade_count: decisions.length },
-    });
-
-    await supabase.from("agent_logs").insert({
-      agent_name: "Strategy Engine",
-      log_type: "learning",
-      message: "Journal — Strategy Engine cycle reflection",
-      reasoning: [
-        `Mode: ${lossRecoveryMode ? "LOSS_RECOVERY" : "NORMAL"}`,
-        `Directive: ${strategyBias}/${riskProfile}`,
-        `Market: ${clock?.is_open ? "OPEN" : "CLOSED"} | Next open: ${clock?.next_open || "unknown"}`,
-        `Signals reviewed: ${signals.length}, Trades recommended: ${decisions.length}`,
-        `Buying power: $${buyingPower.toFixed(2)}`,
-        `Daily PnL: $${dailyPnl.toFixed(2)} (${(dailyPnlPct * 100).toFixed(2)}%)`,
-        lossRecoveryMode
-          ? "Focus: low-risk symbols only; reduce size and protect capital until recovery."
-          : "Focus: patient, high-conviction entries with strict sizing.",
-      ].join(" | "),
+      agent_name: "Strategy Engine", log_type: "decision",
+      message: `Processed ${signals.length} signals → ${decisions.length} trades [NO AI — algorithmic]`,
+      reasoning: decisions.map(d => `${d.side} ${d.qty} ${d.symbol}: ${d.reasoning}`).join("; ") || "No trades.",
     });
 
     await supabase.from("agent_state").update({
-      metric_value: String(decisions.length),
-      metric_label: "active strategies",
+      metric_value: String(decisions.length), metric_label: "active strategies",
       last_action: `Recommended ${decisions.length} trades`,
-      last_action_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      status: "idle",
+      last_action_at: new Date().toISOString(), status: "idle",
     }).eq("agent_name", "Strategy Engine");
 
     return new Response(JSON.stringify({ success: true, decisions }), {
@@ -361,8 +160,7 @@ IMPORTANT RULES:
   } catch (e) {
     console.error("Strategy Engine error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
