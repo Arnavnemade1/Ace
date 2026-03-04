@@ -7,8 +7,7 @@ import { DiscordDispatcher } from './DiscordDispatcher';
 import { logAgentAction } from '../supabase';
 import { alpaca } from '../alpaca';
 import axios from 'axios';
-
-import { TRADING_UNIVERSE, SECTORS } from '../universe';
+import { TRADING_UNIVERSE, SECTORS, SOVEREIGN_PRIORITY_SECTORS } from '../universe';
 
 const CORE_SYMBOLS = [...TRADING_UNIVERSE];
 
@@ -89,9 +88,14 @@ export class SwarmOrchestrator {
             // Stop relying on static movers; sample from the entire 500+ symbol universe
             const allSymbols = [...TRADING_UNIVERSE];
 
-            // 1. Sector Shuffle: Pick a random sector for deep focus
+            // 1. Sector Shuffle: Prioritize Sovereign Sectors (70% weight)
             const sectorNames = Object.keys(SECTORS);
-            const currentSector = sectorNames[Math.floor(Math.random() * sectorNames.length)];
+            const isSovereignCycle = Math.random() < 0.7;
+            const eligibleSectors = isSovereignCycle
+                ? sectorNames.filter(s => SOVEREIGN_PRIORITY_SECTORS.includes(s))
+                : sectorNames;
+
+            const currentSector = eligibleSectors[Math.floor(Math.random() * eligibleSectors.length)] || sectorNames[0];
             const sectorSymbols = SECTORS[currentSector] || [];
 
             // 2. Random Sampling Discovery: Pick 40 symbols randomly from the entire universe

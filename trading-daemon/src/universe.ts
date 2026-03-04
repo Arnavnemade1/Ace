@@ -48,6 +48,8 @@ export const TRADING_UNIVERSE = [
     'BTC/USD', 'ETH/USD', 'LTC/USD', 'BCH/USD', 'DOGE/USD'
 ];
 
+export const SOVEREIGN_PRIORITY_SECTORS = ['BIO', 'ENERGY', 'DEFENSE', 'TECH', 'SEMI'];
+
 export const SECTORS: { [key: string]: string[] } = {
     TECH: ['AAPL', 'MSFT', 'NVDA', 'AVGO', 'ORCL', 'CRM', 'ADBE'],
     SEMI: ['AMD', 'INTC', 'MU', 'ARM', 'TSM', 'QCOM', 'SMCI'],
