@@ -17,7 +17,16 @@ export interface LivingAgent {
     spawnTime: number;
     estimatedLifespanMs: number;
     birthReason: string;
+    specialization?: string;
 }
+
+const PERSONA_SPECIALIZATIONS: Record<PersonaType, string[]> = {
+    'MomentumChaser': ['EMA Cross', 'Volume Spike', 'RSI Breakout', 'Trend Follower'],
+    'ContrarianValue': ['Mean Reversion', 'Oversold Dip', 'Institutional Support', 'Gap Fill'],
+    'TransitionScout': ['Vol Expansion', 'Regime Shift', 'Neural Anomaly', 'Skew Rotation'],
+    'CommoditySniper': ['Oil-Equities', 'Gold Arb', 'Geopolitics', 'Spread Capture'],
+    'VolatilityHarvester': ['VIX Decay', 'Iron Condor', 'Theta Burn', 'Vol Crushing']
+};
 
 export class PersonaManager {
     private livingAgents: LivingAgent[] = [];
@@ -92,6 +101,8 @@ export class PersonaManager {
         if (regime.macro_factors.spy_volatililty > 0.25) lifespanHours *= 0.7;
 
         const msLifespan = Math.floor(lifespanHours * 60 * 60 * 1000);
+        const specs = PERSONA_SPECIALIZATIONS[persona];
+        const specialization = specs[Math.floor(Math.random() * specs.length)];
 
         const agent: LivingAgent = {
             id: uuidv4(),
@@ -99,7 +110,8 @@ export class PersonaManager {
             regimeAffinity: regime.regime_type,
             spawnTime: Date.now(),
             estimatedLifespanMs: msLifespan,
-            birthReason: `Spawned due to dominant ${regime.regime_type} regime (Confidence: ${(regime.confidence * 100).toFixed(0)}%)`
+            specialization,
+            birthReason: `Spawned due to dominant ${regime.regime_type} regime (Focus: ${specialization}, Confidence: ${(regime.confidence * 100).toFixed(0)}%)`
         };
 
         this.livingAgents.push(agent);
@@ -116,7 +128,8 @@ export class PersonaManager {
             status: 'born', // Will transition to active
             regime_affinity: agent.regimeAffinity,
             spawn_time: new Date(agent.spawnTime).toISOString(),
-            estimated_lifespan_ms: agent.estimatedLifespanMs
+            estimated_lifespan_ms: agent.estimatedLifespanMs,
+            specialization: agent.specialization // Logic will handle if column exists
         });
 
         // Immediately set to active

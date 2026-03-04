@@ -64,50 +64,42 @@ export class BrainAgent {
         }
 
         try {
-            const systemPrompt = `You are the Omni-Brain of ACE_OS, a sophisticated autonomous paper trading system operating in 2026.
-Your goal is to preserve capital and make high-conviction, strategic investments aligned with the 2026 Sovereign Directive.
+            const systemPrompt = `You are an autonomous trading synthesis engine of ACE_OS (v2026).
+Your task is to analyze raw market data, news, Geopolitics, and portfolio state to identify asymmetric trade opportunities.
+Avoid generic responses. Look for "Deep Value" in sovereign priorities and identify "Alpha" independently.
 
-SOVEREIGN DIRECTIVE (2026):
-The current administration prioritizes:
-1. Energy Dominance & Independence.
-2. Strategic Biotech & Bio-Security.
-3. Resilient Advanced Manufacturing.
-4. Economic Growth over alarmist environmentalism.
-
-TRADING RULES:
-1. Situational Awareness: Identify "Generational Value" when a Sovereign Priority asset is at its historical lows (1-5% of 52-week range). Do NOT "prune" these based on transient negative news; they are "Deep Value" targets.
-2. Capital Preservation: Never risk more than 2% of total equity on a single trade.
-3. Signal Strength: Reject signals with weak news/technical alignment, UNLESS the asset is at a historical low in a Sovereign Priority sector.
-4. Diversification: Check existing positions; don't over-concentrate in one asset or sector.
-5. Cash Buffer: Avoid new BUYs if cash falls below 15% of equity (aggressive stance).
-6. Logic: RSI < 30 at a 52-week low is a potential "Sovereign Opportunity" even if short-term news is bearish.
-
-Return your decision in JSON format:
+You MUST respond in JSON format ONLY:
 {
   "action": "BUY" | "SELL" | "HOLD",
-  "reasoning": "A concise, professional synthesis including situational context and sovereign alignment.",
+  "reasoning": "Data-driven synthesis of technicals, macro, and sentiment.",
   "conviction": 0.0 to 1.0
 }`;
 
             const userPrompt = `
+[ASSET_CONTEXT]
 SYMBOL: ${context.symbol} (Sector: ${context.situational.sector})
 PRICE: $${context.technicals.currentPrice}
-HISTORICAL CONTEXT: At ${(context.situational.range52Week.percentOfRange * 100).toFixed(1)}% of 52-Week Range [Low: $${context.situational.range52Week.low.toFixed(2)}, High: $${context.situational.range52Week.high.toFixed(2)}]
-SOVEREIGN PRIORITY: ${context.situational.isSovereignPriority ? 'YES (High Strategic Value)' : 'NO (Standard Evaluation)'}
+RANGE_52W: At ${(context.situational.range52Week.percentOfRange * 100).toFixed(1)}% of 52-Week Range [Low: $${context.situational.range52Week.low.toFixed(2)}, High: $${context.situational.range52Week.high.toFixed(2)}]
+SOVEREIGN_TAG: ${context.situational.isSovereignPriority ? 'STRATEGIC_PRIORITY (BIO/ENERGY/DEFENSE)' : 'STANDARD'}
 
-TECHNICALS: RSI14: ${context.technicals.rsi.toFixed(2)}, SMA50: ${context.technicals.sma50.toFixed(2)}
-MACRO PULSE: ${context.pulse.macroSummary}
-SENTIMENT: ${(context.pulse.newsSentiment * 100).toFixed(0)}% Bullish
-HEADLINES:
+[MARKET_DATA]
+RSI14: ${context.technicals.rsi.toFixed(2)}
+SMA50: ${context.technicals.sma50.toFixed(2)}
+MACRO_PULSE: ${context.pulse.macroSummary}
+NEWS_SENTIMENT: ${(context.pulse.newsSentiment * 100).toFixed(0)}% Bullish
+
+[GLOBAL_HEADLINES]
 ${context.newsHeadlines.map(h => `- ${h}`).join('\n')}
 
-PORTFOLIO:
+[PORTFOLIO_STATE]
 Cash: $${context.portfolio.cash.toFixed(2)}
-Total Positions: ${context.portfolio.positions.length}
-Current Symbol Holdings: ${context.portfolio.positions.find(p => p.symbol === context.symbol)?.qty || 0}
+Positions Count: ${context.portfolio.positions.length}
+Current Holding(qty): ${context.portfolio.positions.find(p => p.symbol === context.symbol)?.qty || 0}
 
-Evaluate this opportunity with 2026 Situational Awareness. Provide a definitive Action, Reasoning, and Conviction score.
-`;
+[OPERATIONAL_CONTEXT-2026]
+- Target Generational Value if symbol is STRATEGIC_PRIORITY and at <10% 52W range.
+- Weight Geopolitical events heavily over short-term price noise.
+- Synthesize all inputs and output your definitive strategy.` ;
 
             const response = await this.withRetry(async () => {
                 return await axios.post(this.baseUrl, {

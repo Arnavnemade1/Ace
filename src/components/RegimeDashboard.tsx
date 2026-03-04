@@ -200,9 +200,12 @@ export default function RegimeDashboard() {
                                 >
                                     <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
                                     <RadialBar
-                                        background={{ fill: 'rgba(255,255,255,0.05)' }}
+                                        background={{ fill: 'rgba(255,255,255,0.03)' }}
                                         dataKey="value"
-                                        cornerRadius={10}
+                                        cornerRadius={15}
+                                        label={false}
+                                        animationDuration={1500}
+                                        isAnimationActive={true}
                                     />
                                 </RadialBarChart>
                             </ResponsiveContainer>
@@ -265,7 +268,12 @@ export default function RegimeDashboard() {
                                                     <Icon className="w-4 h-4 text-green-400" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="text-xs font-bold text-white truncate">{agent.persona}</div>
+                                                    <div className="text-xs font-bold text-white truncate flex items-center gap-1">
+                                                        {agent.persona}
+                                                        {(agent as any).specialization && (
+                                                            <span className="text-[9px] font-mono text-green-400 opacity-60">[{(agent as any).specialization}]</span>
+                                                        )}
+                                                    </div>
                                                     <div className="text-[10px] text-white/40 font-mono truncate">ID: {agent.id.slice(0, 8)}</div>
                                                 </div>
                                                 <div className="text-right">
