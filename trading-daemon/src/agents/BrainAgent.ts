@@ -111,7 +111,7 @@ Evaluate this opportunity with 2026 Situational Awareness. Provide a definitive 
 
             const response = await this.withRetry(async () => {
                 return await axios.post(this.baseUrl, {
-                    model: 'google/gemini-2.0-flash-exp', // Reverting to Flash to save costs
+                    model: 'google/gemini-2.5-flash', // Switching to 2.5 Flash (Free Tier) for 2026 context
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: userPrompt }
