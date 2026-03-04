@@ -111,7 +111,7 @@ Evaluate this opportunity with 2026 Situational Awareness. Provide a definitive 
 
             const response = await this.withRetry(async () => {
                 return await axios.post(this.baseUrl, {
-                    model: 'google/gemini-pro', // Using Pro for better situational reasoning
+                    model: 'google/gemini-2.0-flash-exp', // Reverting to Flash to save costs
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: userPrompt }
