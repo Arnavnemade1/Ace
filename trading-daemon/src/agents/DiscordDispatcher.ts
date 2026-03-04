@@ -5,19 +5,25 @@ export class DiscordDispatcher {
         return process.env.DISCORD_DAEMON_ENABLED === 'true';
     }
 
-    static async postUpdate(title: string, description: string, color: number = 3447003) {
+    static async postUpdate(title: string, description: string, color: number = 3447003, imageUrl?: string) {
         if (!this.enabled()) return;
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
         try {
+            const embed: any = {
+                title,
+                description,
+                color,
+                timestamp: new Date().toISOString(),
+                footer: { text: "ACE_OS — Auto-Trading Daemon" }
+            };
+
+            if (imageUrl) {
+                embed.image = { url: imageUrl };
+            }
+
             await axios.post(WEBHOOK_URL, {
-                embeds: [{
-                    title,
-                    description,
-                    color,
-                    timestamp: new Date().toISOString(),
-                    footer: { text: "ACE_OS — Auto-Trading Daemon" }
-                }]
+                embeds: [embed]
             });
         } catch (e) {
             console.error(`[Discord] Failed to post update:`, e);
@@ -79,6 +85,35 @@ export class DiscordDispatcher {
             });
         } catch (e) {
             console.error(`[Discord] Failed to post queue alert:`, e);
+        }
+    }
+
+    static async postOracleLifecycle(action: 'SPAWN' | 'KILL', agentName: string, reason: string, regime: string) {
+        if (!this.enabled()) return;
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+        if (!WEBHOOK_URL) return;
+
+        const isBirth = action === 'SPAWN';
+        const title = isBirth ? `🐣 ORACLE_SPAWN — ${agentName}` : `💀 ORACLE_RETIRE — ${agentName}`;
+        const color = isBirth ? 10181046 : 9807270; // purple for birth, grey for death
+
+        try {
+            await axios.post(WEBHOOK_URL, {
+                embeds: [{
+                    title,
+                    description: [
+                        `**Agent Persona:** ${agentName}`,
+                        `**Regime Context:** ${regime}`,
+                        `**Reasoning:**`,
+                        `${reason}`,
+                    ].join('\n'),
+                    color,
+                    timestamp: new Date().toISOString(),
+                    footer: { text: "ACE_OS — Neural Lifecycle Feed" }
+                }]
+            });
+        } catch (e) {
+            console.error(`[Discord] Failed to post Oracle lifecycle:`, e);
         }
     }
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock, Eye } from "lucide-react";
+import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock, Eye, X } from "lucide-react";
 
 interface AgentLog {
     id: string;
@@ -27,6 +27,7 @@ const AgentArena = () => {
     const [showAllPositions, setShowAllPositions] = useState(false);
     const [showAllOrders, setShowAllOrders] = useState(false);
     const [signals, setSignals] = useState<any[]>([]);
+    const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
 
     const toNum = (v: any) => {
         const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
@@ -343,8 +344,20 @@ const AgentArena = () => {
                                         const marketValue = toNum(pos.market_value) || currentPrice * qty;
                                         const pnl = toNum(pos.unrealized_pl ?? pos.unrealized_intraday_pl ?? 0) + toNum(pos.realized_pl ?? 0);
                                         return (
-                                            <motion.tr key={`${pos.symbol}-${idx}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.03 }} className="hover:bg-secondary/30 transition-colors">
-                                                <td className="px-4 py-3 font-semibold font-display text-foreground">{pos.symbol}</td>
+                                            <motion.tr
+                                                key={`${pos.symbol}-${idx}`}
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                transition={{ delay: idx * 0.03 }}
+                                                className="hover:bg-primary/10 transition-colors cursor-pointer group"
+                                                onClick={() => setSelectedSymbol(pos.symbol)}
+                                            >
+                                                <td className="px-4 py-3 font-semibold font-display text-foreground flex items-center gap-2">
+                                                    {pos.symbol}
+                                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <Activity className="w-3 h-3 text-primary animate-pulse" />
+                                                    </div>
+                                                </td>
                                                 <td className="px-4 py-3">${formatMoney(currentPrice, 2)}</td>
                                                 <td className="px-4 py-3">{qty}</td>
                                                 <td className="px-4 py-3 font-medium">${formatMoney(marketValue, 2)}</td>
@@ -524,6 +537,60 @@ const AgentArena = () => {
                 </div>
 
             </div>
+
+            {/* Bloomberg Terminal Modal */}
+            <AnimatePresence>
+                {selectedSymbol && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-12">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 bg-black/90 backdrop-blur-sm"
+                            onClick={() => setSelectedSymbol(null)}
+                        />
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                            className="relative w-full h-full glass-card border-none overflow-hidden flex flex-col bg-[#0a0a0c]"
+                        >
+                            {/* Modal Header */}
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-black/40">
+                                <div className="flex items-center gap-4">
+                                    <h2 className="text-2xl font-display font-bold text-white flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                                        {selectedSymbol} <span className="text-white/30 text-sm font-mono tracking-widest font-normal">BLOOMBERG_TERMINAL_V4</span>
+                                    </h2>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedSymbol(null)}
+                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-white/50 hover:text-white"
+                                >
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+
+                            {/* Chart View */}
+                            <div className="flex-1 bg-black relative">
+                                <iframe
+                                    src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_762ae&symbol=${selectedSymbol}&interval=1&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=%5B%5D&theme=dark&style=1&timezone=Etc%2FUTC&studies_overrides=%7B%7D&overrides=%7B%7D&enabled_features=%5B%5D&disabled_features=%5B%5D&locale=en&utm_source=localhost&utm_medium=widget&utm_campaign=chart&utm_term=${selectedSymbol}`}
+                                    className="w-full h-full border-none"
+                                />
+                            </div>
+
+                            {/* Modal Footer */}
+                            <div className="px-6 py-3 border-t border-white/5 bg-black/40 flex items-center gap-8 overflow-x-auto text-[10px] font-mono whitespace-nowrap">
+                                <span className="text-primary font-bold">STREAM: ACTIVE</span>
+                                <span className="text-white/30">DEPTH_OF_BOOK: 100%</span>
+                                <span className="text-white/30">EXECUTION_GATE: ARMED</span>
+                                <span className="text-white/30">NEURAL_SENTIMENT: 0.82</span>
+                                <span className="ml-auto text-white/20">CTRL+S TO SYNC DASHBOARD</span>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

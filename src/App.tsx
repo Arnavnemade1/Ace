@@ -11,6 +11,7 @@ import NotFound from "./pages/NotFound";
 
 import { FloatingStatusBar } from "./components/FloatingStatusBar";
 import { HandshakeOverlay } from "./components/HandshakeOverlay";
+import Oracle from "./pages/Oracle";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/arena" element={<AgentArena />} />
+          <Route path="/oracle" element={<Oracle />} />
           <Route path="/analytics" element={<Analytics />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
