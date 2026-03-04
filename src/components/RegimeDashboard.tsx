@@ -348,7 +348,10 @@ export default function RegimeDashboard() {
                             <div className="px-6 py-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg bg-black/50 border border-white/5 ${selectedAgent.status === 'retired' ? 'text-red-400' : 'text-green-400'}`}>
-                                        {(PERSONA_ICONS[selectedAgent.persona] || Brain)({ className: "w-5 h-5" })}
+                                        {(() => {
+                                            const AgentIcon = PERSONA_ICONS[selectedAgent.persona] || Brain;
+                                            return <AgentIcon className="w-5 h-5" />;
+                                        })()}
                                     </div>
                                     <div>
                                         <h3 className="text-lg font-bold text-white">{selectedAgent.persona}</h3>
