@@ -22,12 +22,13 @@ export interface DynamicPersona {
 
 export class PersonaManager {
     private livingAgents: LivingAgent[] = [];
+    private readonly genericNamePattern = /(momentum|intraday|trader|scalper|chaser|sniper|harvester|hunter|agent\s*\d*)/i;
 
     /**
      * Adapts the swarm based on instructions from the Orchestrator.
      */
     async adaptWithInstructions(regime: RegimeState, instructions: DynamicPersona[]) {
-        const normalizedInstructions = this.normalizeInstructions(instructions);
+        const normalizedInstructions = this.normalizeInstructions(instructions, regime);
         const now = Date.now();
         const idealNames = normalizedInstructions.map(i => i.name);
 
@@ -71,14 +72,17 @@ export class PersonaManager {
         );
     }
 
-    private normalizeInstructions(instructions: DynamicPersona[]): DynamicPersona[] {
+    private normalizeInstructions(instructions: DynamicPersona[], regime: RegimeState): DynamicPersona[] {
         const uniqueByName = new Set<string>();
         const normalized: DynamicPersona[] = [];
+        let idx = 0;
 
         for (const instr of instructions || []) {
-            const cleanedName = String(instr?.name || '')
+            idx++;
+            const proposedName = String(instr?.name || '')
                 .replace(/\s+/g, ' ')
                 .trim();
+            const cleanedName = this.ensureAuthenticName(proposedName, regime, `${idx}-${instr?.task || ''}`);
             const cleanedTask = String(instr?.task || '')
                 .replace(/\s+/g, ' ')
                 .trim();
@@ -99,6 +103,35 @@ export class PersonaManager {
         }
 
         return normalized;
+    }
+
+    private ensureAuthenticName(name: string, regime: RegimeState, seedInput: string): string {
+        if (name && !this.genericNamePattern.test(name)) {
+            return name;
+        }
+
+        const prefixesByRegime: Record<string, string[]> = {
+            'high-vol-reversion': ['Vol', 'Gamma', 'Revert', 'Shock', 'Tail'],
+            'low-vol-trend': ['Trend', 'Flow', 'Carry', 'Drift', 'Signal'],
+            'quiet-accumulation': ['Base', 'Layer', 'Delta', 'Accum', 'Gradual'],
+            'crisis-transition': ['Stress', 'Pivot', 'Break', 'Flux', 'Switch'],
+            'commodity-supercycle': ['Macro', 'Curve', 'Basis', 'Barrel', 'Energy']
+        };
+        const suffixes = ['Atlas', 'Relay', 'Sentinel', 'Circuit', 'Forge', 'Protocol', 'Kernel', 'Vector'];
+        const prefixes = prefixesByRegime[regime.regime_type] || prefixesByRegime['low-vol-trend'];
+        const seed = this.hash(`${regime.regime_type}-${seedInput}-${Date.now()}`);
+        const prefix = prefixes[seed % prefixes.length];
+        const suffix = suffixes[(seed >> 3) % suffixes.length];
+        return `${prefix} ${suffix} ${(seed % 10000).toString().padStart(4, '0')}`;
+    }
+
+    private hash(input: string): number {
+        let h = 0;
+        for (let i = 0; i < input.length; i++) {
+            h = (h << 5) - h + input.charCodeAt(i);
+            h |= 0;
+        }
+        return Math.abs(h);
     }
 
     private async spawnAgent(instr: DynamicPersona, regime: RegimeState) {

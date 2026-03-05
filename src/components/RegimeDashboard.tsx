@@ -62,6 +62,24 @@ function parseMission(task?: string) {
     return { summary, deliverable, success, handoff };
 }
 
+function isGenericPersonaName(name?: string) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return true;
+    return /(momentum|intraday|trader|scalper|chaser|sniper|harvester|hunter|agent\s*\d*)/.test(n);
+}
+
+function personaLabel(agent: Pick<AgentLifecycle, 'persona' | 'id' | 'regime_affinity' | 'specialization'>) {
+    const original = String(agent.persona || '').trim();
+    if (!isGenericPersonaName(original)) return original;
+
+    const leftTokens = ['Vector', 'Atlas', 'Signal', 'Pulse', 'Flux', 'Grid', 'Kernel', 'Vertex'];
+    const rightTokens = ['Protocol', 'Relay', 'Sentinel', 'Circuit', 'Map', 'Forge', 'Ledger', 'Pilot'];
+    const seed = hashText(`${agent.id}|${agent.regime_affinity}|${agent.specialization || ''}`);
+    const left = leftTokens[seed % leftTokens.length];
+    const right = rightTokens[(seed >> 3) % rightTokens.length];
+    return `${left} ${right} ${agent.id.slice(0, 4).toUpperCase()}`;
+}
+
 export default function RegimeDashboard() {
     const [currentRegime, setCurrentRegime] = useState<Regime | null>(null);
     const [agents, setAgents] = useState<AgentLifecycle[]>([]);
@@ -245,7 +263,8 @@ export default function RegimeDashboard() {
                                         </div>
                                     )}
                                     {activeAgents.map(agent => {
-                                        const Icon = pickPersonaIcon(agent.persona, agent.specialization);
+                                        const displayName = personaLabel(agent);
+                                        const Icon = pickPersonaIcon(displayName, agent.specialization);
                                         const mission = parseMission(agent.task);
                                         return (
                                             <motion.div
@@ -261,7 +280,7 @@ export default function RegimeDashboard() {
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="text-xs font-bold text-white truncate flex items-center gap-1">
-                                                        {agent.persona}
+                                                        {displayName}
                                                         {agent.specialization && (
                                                             <span className="text-[9px] font-mono text-green-400 opacity-60">[{agent.specialization}]</span>
                                                         )}
@@ -301,7 +320,8 @@ export default function RegimeDashboard() {
                                         </div>
                                     )}
                                     {retiredAgents.map(agent => {
-                                        const Icon = pickPersonaIcon(agent.persona, agent.specialization);
+                                        const displayName = personaLabel(agent);
+                                        const Icon = pickPersonaIcon(displayName, agent.specialization);
                                         return (
                                             <motion.div
                                                 key={agent.id}
@@ -314,7 +334,7 @@ export default function RegimeDashboard() {
                                                     <Icon className="w-4 h-4 text-white/30" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="text-xs font-bold text-white/50 line-through truncate">{agent.persona}</div>
+                                                    <div className="text-xs font-bold text-white/50 line-through truncate">{displayName}</div>
                                                     <div className="text-[10px] text-white/30 font-mono mt-1 italic break-words leading-tight">
                                                         "{agent.death_reason || 'Natural expiration'}"
                                                     </div>
@@ -352,12 +372,12 @@ export default function RegimeDashboard() {
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg bg-black/50 border border-white/5 ${selectedAgent.status === 'retired' ? 'text-red-400' : 'text-green-400'}`}>
                                         {(() => {
-                                            const AgentIcon = pickPersonaIcon(selectedAgent.persona, selectedAgent.specialization);
+                                            const AgentIcon = pickPersonaIcon(personaLabel(selectedAgent), selectedAgent.specialization);
                                             return <AgentIcon className="w-5 h-5" />;
                                         })()}
                                     </div>
                                     <div>
-                                        <h3 className="text-lg font-bold text-white">{selectedAgent.persona}</h3>
+                                        <h3 className="text-lg font-bold text-white">{personaLabel(selectedAgent)}</h3>
                                         <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.2em]">Team Directive — {selectedAgent.id.slice(0, 8)}</p>
                                     </div>
                                 </div>
