@@ -1,23 +1,26 @@
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Activity, Brain, Shield, Zap, Globe, Cpu, Microscope, Search, TrendingUp, AlertTriangle, Layers, Database, Wifi } from "lucide-react";
+import { Brain, Layers, Database, Wifi } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import RegimeDashboard from "@/components/RegimeDashboard";
 
 const STREAMS = [
-    "INIT_NEURAL_PATHWAYS...",
-    "CALIBRATING_VIX_THRESHOLD...",
-    "SWARM_RESONANCE_STABLE_85%",
-    "TRANSITION_SCOUT_ANOMALY_ENERGY",
-    "DEPLOYING_SCALPERS_MOMENTUM",
-    "RISK_CTRL_CASH_FLOOR_150K",
-    "BYPASSING_HOLDING_PERIODS",
+    "CAPTAIN_BOOTSTRAP_COMPLETE...",
+    "TEAM_ROSTER_SYNCED...",
+    "MISSION_PIPELINE_HEALTHY...",
+    "RISK_LEAD_CASH_FLOOR_LOCKED...",
+    "EXECUTION_HANDOFF_SIGNAL_READY...",
+    "REGIME_SHIFT_WATCH_ACTIVE...",
+    "SWARM_TEAM_RESONANCE_STABLE...",
 ];
 
 export default function Oracle() {
     const [logStream, setLogStream] = useState<string[]>([]);
     const [subagents, setSubagents] = useState<any[]>([]);
+    const activeCount = subagents.filter((agent) => agent.status === "active").length;
+    const idleCount = subagents.filter((agent) => agent.status === "idle").length;
+    const errorCount = subagents.filter((agent) => agent.status === "error").length;
 
     useEffect(() => {
         window.scrollTo(0, 0);
@@ -68,10 +71,10 @@ export default function Oracle() {
                                 <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
                                     <Layers className="w-8 h-8" />
                                 </div>
-                                COMMAND CENTER
+                                TEAM COMMAND DECK
                             </h1>
                             <p className="text-white/30 text-xs font-mono tracking-[0.3em] uppercase">
-                                Real-time Swarm Intelligence Matrix
+                                Real-time Captain + Squad Coordination
                             </p>
                         </div>
                         <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 flex flex-col justify-center">
@@ -97,10 +100,13 @@ export default function Oracle() {
                     <div className="grid grid-cols-1 gap-12">
                         {/* Subagent Status Matrix */}
                         <section>
-                            <div className="flex items-center gap-3 mb-6">
+                            <div className="flex items-center gap-3 mb-6 flex-wrap">
                                 <Database className="w-5 h-5 text-indigo-400" />
-                                <h2 className="text-sm font-bold tracking-[0.2em] uppercase text-white/50">Subagent Core Array</h2>
+                                <h2 className="text-sm font-bold tracking-[0.2em] uppercase text-white/50">Core Team Pods</h2>
                                 <div className="h-px flex-1 bg-white/5" />
+                                <span className="text-[10px] font-mono px-2 py-1 rounded border border-green-500/30 text-green-300 bg-green-500/10">Active {activeCount}</span>
+                                <span className="text-[10px] font-mono px-2 py-1 rounded border border-white/10 text-white/50">Idle {idleCount}</span>
+                                <span className="text-[10px] font-mono px-2 py-1 rounded border border-red-500/30 text-red-300 bg-red-500/10">Error {errorCount}</span>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {subagents.map((agent) => (
@@ -109,7 +115,7 @@ export default function Oracle() {
                             </div>
                         </section>
 
-                        {/* The core regime dashboard with nursery/cemetery */}
+                        {/* Dynamic team lifecycle dashboard */}
                         <RegimeDashboard />
                     </div>
                 </div>
@@ -124,7 +130,7 @@ export default function Oracle() {
                     </span>
                     <span className="hidden md:flex items-center gap-2">
                         <div className="w-1.5 h-px bg-white/20" />
-                        DATALINK: PERSISTENT
+                        TEAMLINK: PERSISTENT
                     </span>
                     <span className="ml-auto text-white/20 tracking-[0.3em]">SECURE SECTOR 7-G</span>
                 </div>
@@ -165,29 +171,10 @@ function SubagentCard({ agent }: { agent: any }) {
                     <div className="text-xs font-bold text-indigo-300">{agent.metric_value || '0.00'}</div>
                 </div>
                 <div className="p-2 rounded-lg bg-black/40 border border-white/5 text-right">
-                    <div className="text-[8px] text-white/20 uppercase font-mono">Target</div>
+                    <div className="text-[8px] text-white/20 uppercase font-mono">Mission</div>
                     <div className="text-[9px] font-mono text-white/60 truncate">{agent.metric_label || 'Wait'}</div>
                 </div>
             </div>
         </motion.div>
-    );
-}
-
-function TacticalCard({ icon, title, value, status }: { icon: any, title: string, value: string, status: string }) {
-    return (
-        <div className="glass-card p-6 flex items-center justify-between border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-colors group">
-            <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-white/5 group-hover:scale-110 transition-transform">
-                    {icon}
-                </div>
-                <div>
-                    <h4 className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-bold mb-1">{title}</h4>
-                    <p className="text-sm font-bold tracking-widest text-white/90">{value}</p>
-                </div>
-            </div>
-            <div className="text-[10px] font-mono text-white/40 border border-white/10 px-2 py-1 rounded">
-                {status}
-            </div>
-        </div>
     );
 }

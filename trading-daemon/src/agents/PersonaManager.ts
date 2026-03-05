@@ -1,5 +1,5 @@
 import { supabase, logAgentAction } from '../supabase';
-import { RegimeState, MarketRegimeType } from './RegimeOracle';
+import { RegimeState } from './RegimeOracle';
 import { v4 as uuidv4 } from 'uuid';
 import { DiscordDispatcher } from './DiscordDispatcher';
 
@@ -27,8 +27,9 @@ export class PersonaManager {
      * Adapts the swarm based on instructions from the Orchestrator.
      */
     async adaptWithInstructions(regime: RegimeState, instructions: DynamicPersona[]) {
+        const normalizedInstructions = this.normalizeInstructions(instructions);
         const now = Date.now();
-        const idealNames = instructions.map(i => i.name);
+        const idealNames = normalizedInstructions.map(i => i.name);
 
         // 1. Natural Aging & Mismatch Death
         const survivors: LivingAgent[] = [];
@@ -53,12 +54,51 @@ export class PersonaManager {
         this.livingAgents = survivors;
 
         // 2. Spawning new instructions
-        const currentNames = this.livingAgents.map(a => a.name);
-        for (const instr of instructions) {
-            if (!currentNames.includes(instr.name)) {
+        const currentNames = new Set(this.livingAgents.map(a => a.name.toLowerCase()));
+        for (const instr of normalizedInstructions) {
+            const key = instr.name.toLowerCase();
+            if (!currentNames.has(key)) {
                 await this.spawnAgent(instr, regime);
+                currentNames.add(key);
             }
         }
+
+        await logAgentAction(
+            'PersonaManager',
+            'info',
+            `Team Roster Synced (${this.livingAgents.length} active)`,
+            this.livingAgents.map(a => `${a.name} -> ${a.specialization || 'adaptive ops'}`).join(' | ')
+        );
+    }
+
+    private normalizeInstructions(instructions: DynamicPersona[]): DynamicPersona[] {
+        const uniqueByName = new Set<string>();
+        const normalized: DynamicPersona[] = [];
+
+        for (const instr of instructions || []) {
+            const cleanedName = String(instr?.name || '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const cleanedTask = String(instr?.task || '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const cleanedSpecialization = String(instr?.specialization || '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (!cleanedName || !cleanedTask) continue;
+            const key = cleanedName.toLowerCase();
+            if (uniqueByName.has(key)) continue;
+            uniqueByName.add(key);
+
+            normalized.push({
+                name: cleanedName,
+                task: cleanedTask,
+                specialization: cleanedSpecialization || 'Adaptive market operations'
+            });
+        }
+
+        return normalized;
     }
 
     private async spawnAgent(instr: DynamicPersona, regime: RegimeState) {
@@ -70,7 +110,7 @@ export class PersonaManager {
             id: uuidv4(),
             name: instr.name,
             task: instr.task,
-            specialization: instr.specialization,
+            specialization: instr.specialization || 'Adaptive market operations',
             regimeAffinity: regime.regime_type,
             spawnTime: Date.now(),
             estimatedLifespanMs: msLifespan,

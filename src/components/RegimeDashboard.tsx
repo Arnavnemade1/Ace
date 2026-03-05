@@ -4,11 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
     RadialBarChart,
     RadialBar,
-    Legend,
     ResponsiveContainer,
     PolarAngleAxis
 } from "recharts";
-import { Brain, Activity, Target, Zap, Clock, Skull, Info, X, Shield, Globe, Cpu } from "lucide-react";
+import { Brain, Activity, Target, Zap, Clock, Skull, X, Shield, Globe, Cpu } from "lucide-react";
 
 interface Regime {
     regime_type: string;
@@ -25,6 +24,8 @@ interface AgentLifecycle {
     spawn_time: string;
     death_time: string | null;
     death_reason: string | null;
+    task?: string;
+    specialization?: string;
 }
 
 const REGIME_COLORS: Record<string, string> = {
@@ -35,41 +36,31 @@ const REGIME_COLORS: Record<string, string> = {
     'commodity-supercycle': '#f97316'  // Orange
 };
 
-const PERSONA_ICONS: Record<string, any> = {
-    'MomentumChaser': Zap,
-    'ContrarianValue': Brain,
-    'TransitionScout': Target,
-    'CommoditySniper': Activity,
-    'VolatilityHarvester': Cpu,
-    'IntradayScalper': Shield
-};
+const TEAM_ICON_POOL = [Brain, Activity, Shield, Cpu, Target, Zap, Globe];
 
-const PERSONA_DETAILS: Record<string, { role: string, strategy: string }> = {
-    'MomentumChaser': {
-        role: "High-velocity trend capture.",
-        strategy: "Uses exponential moving averages (EMA) and volume-weighted price action to identify sustained directional moves. Thrives in low-volatility trending markets."
-    },
-    'ContrarianValue': {
-        role: "Mean reversion specialist.",
-        strategy: "Identifies overextended RSI levels and institutional order block support/resistance. Seeks stability in volatile or consolidating regimes."
-    },
-    'TransitionScout': {
-        role: "Regime shift detector.",
-        strategy: "Monitors kurtosis of returns and volatility clustering to predict regime transitions before they manifest in price. High neural sensitivity."
-    },
-    'CommoditySniper': {
-        role: "Cross-asset arbitrage.",
-        strategy: "Correlates equities with spot commodity prices (Oil, Gold, NatGas) to extract value from lagging sector moves. Geo-political bias enabled."
-    },
-    'VolatilityHarvester': {
-        role: "VIX decay extraction.",
-        strategy: "Profits from volatility crush events and term structure premiums. Deploys relative-value spreads during sentiment extremes."
-    },
-    'IntradayScalper': {
-        role: "Micro-movement extraction.",
-        strategy: "Targets sub-percentage shifts with hyper-fast entry/exit logic. Uses tight stop-losses to maintain positive expectancy in high-noise environments."
+function hashText(value: string): number {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash << 5) - hash + value.charCodeAt(i);
+        hash |= 0;
     }
-};
+    return Math.abs(hash);
+}
+
+function pickPersonaIcon(persona: string, specialization?: string) {
+    const idx = hashText(`${persona}|${specialization || ''}`) % TEAM_ICON_POOL.length;
+    return TEAM_ICON_POOL[idx] || Brain;
+}
+
+function parseMission(task?: string) {
+    const mission = String(task || '').trim();
+    const deliverable = mission.match(/Deliverable:\s*([^.]*)/i)?.[1]?.trim();
+    const success = mission.match(/Success:\s*([^.]*)/i)?.[1]?.trim();
+    const handoff = mission.match(/Handoff:\s*([^.]*)/i)?.[1]?.trim();
+    const summary = mission.replace(/\s*Deliverable:.*$/i, '').trim() || 'Adaptive mission assigned by Orchestrator.';
+
+    return { summary, deliverable, success, handoff };
+}
 
 export default function RegimeDashboard() {
     const [currentRegime, setCurrentRegime] = useState<Regime | null>(null);
@@ -177,7 +168,7 @@ export default function RegimeDashboard() {
                         Market Regime Oracle
                     </h2>
                     <p className="text-white/40 font-mono text-sm mt-2 max-w-2xl">
-                        Biological adaptation layer. The swarm dynamically shifts composition and lifespan based on classified macroeconomic conditions.
+                        Live squad management layer. The captain can commission any specialist team profile, then rotate the roster as market conditions evolve.
                     </p>
                 </div>
 
@@ -235,14 +226,14 @@ export default function RegimeDashboard() {
                         )}
                     </div>
 
-                    {/* RIGHT COLUMN: Nursery and Cemetery */}
+                    {/* RIGHT COLUMN: Active and Retired Team Members */}
                     <div className="col-span-1 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
 
-                        {/* THE NURSERY (Active Agents) */}
+                        {/* ACTIVE TEAM */}
                         <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 flex flex-col h-[350px]">
                             <h3 className="text-sm font-mono uppercase tracking-widest text-white/50 mb-6 flex items-center gap-2">
                                 <Zap className="w-4 h-4 text-green-400" />
-                                Active Personas
+                                Active Team
                                 <span className="ml-auto bg-green-500/20 text-green-400 px-2 py-0.5 rounded text-[10px]">{activeAgents.length}</span>
                             </h3>
 
@@ -250,11 +241,12 @@ export default function RegimeDashboard() {
                                 <AnimatePresence>
                                     {activeAgents.length === 0 && (
                                         <div className="text-center text-white/20 text-xs py-10 font-mono italic">
-                                            Awaiting swarm spawn...
+                                            Awaiting squad deployment...
                                         </div>
                                     )}
                                     {activeAgents.map(agent => {
-                                        const Icon = PERSONA_ICONS[agent.persona] || Brain;
+                                        const Icon = pickPersonaIcon(agent.persona, agent.specialization);
+                                        const mission = parseMission(agent.task);
                                         return (
                                             <motion.div
                                                 key={agent.id}
@@ -270,12 +262,12 @@ export default function RegimeDashboard() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="text-xs font-bold text-white truncate flex items-center gap-1">
                                                         {agent.persona}
-                                                        {(agent as any).specialization && (
-                                                            <span className="text-[9px] font-mono text-green-400 opacity-60">[{(agent as any).specialization}]</span>
+                                                        {agent.specialization && (
+                                                            <span className="text-[9px] font-mono text-green-400 opacity-60">[{agent.specialization}]</span>
                                                         )}
                                                     </div>
                                                     <div className="text-[9px] text-white/50 italic truncate max-w-[150px]">
-                                                        {(agent as any).task || 'Specialized mission active...'}
+                                                        {mission.summary}
                                                     </div>
                                                     <div className="text-[10px] text-white/40 font-mono truncate">ID: {agent.id.slice(0, 8)}</div>
                                                 </div>
@@ -283,7 +275,7 @@ export default function RegimeDashboard() {
                                                     <div className="text-[10px] uppercase text-white/30 tracking-wider">Status</div>
                                                     <div className="text-xs text-green-400 font-mono flex items-center gap-1">
                                                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                                                        Alive
+                                                        In Play
                                                     </div>
                                                 </div>
                                             </motion.div>
@@ -293,23 +285,23 @@ export default function RegimeDashboard() {
                             </div>
                         </div>
 
-                        {/* THE CEMETERY (Retired Agents) */}
+                        {/* RETIRED TEAM */}
                         <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 flex flex-col h-[350px]">
                             <h3 className="text-sm font-mono uppercase tracking-widest text-white/50 mb-6 flex items-center gap-2">
                                 <Skull className="w-4 h-4 text-red-400" />
-                                Cemetery
-                                <span className="ml-auto text-white/20 text-[10px]">Recent Casualties</span>
+                                Retired Members
+                                <span className="ml-auto text-white/20 text-[10px]">Recent Rotations</span>
                             </h3>
 
                             <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
                                 <AnimatePresence>
                                     {retiredAgents.length === 0 && (
                                         <div className="text-center text-white/20 text-xs py-10 font-mono italic">
-                                            No recent retirements.
+                                            No recent rotations.
                                         </div>
                                     )}
                                     {retiredAgents.map(agent => {
-                                        const Icon = PERSONA_ICONS[agent.persona] || Brain;
+                                        const Icon = pickPersonaIcon(agent.persona, agent.specialization);
                                         return (
                                             <motion.div
                                                 key={agent.id}
@@ -360,13 +352,13 @@ export default function RegimeDashboard() {
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg bg-black/50 border border-white/5 ${selectedAgent.status === 'retired' ? 'text-red-400' : 'text-green-400'}`}>
                                         {(() => {
-                                            const AgentIcon = PERSONA_ICONS[selectedAgent.persona] || Brain;
+                                            const AgentIcon = pickPersonaIcon(selectedAgent.persona, selectedAgent.specialization);
                                             return <AgentIcon className="w-5 h-5" />;
                                         })()}
                                     </div>
                                     <div>
                                         <h3 className="text-lg font-bold text-white">{selectedAgent.persona}</h3>
-                                        <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.2em]">Agent Directive — {selectedAgent.id.slice(0, 8)}</p>
+                                        <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.2em]">Team Directive — {selectedAgent.id.slice(0, 8)}</p>
                                     </div>
                                 </div>
                                 <button
@@ -382,13 +374,20 @@ export default function RegimeDashboard() {
                                 {/* Role Section */}
                                 <div>
                                     <h4 className="text-[10px] font-mono text-white/20 uppercase tracking-[0.3em] mb-3 flex items-center gap-2">
-                                        <Shield className="w-3 h-3" /> Technical Directive
+                                        <Shield className="w-3 h-3" /> Mission Brief
                                     </h4>
                                     <p className="text-sm font-medium text-white/90 leading-relaxed italic">
-                                        "{PERSONA_DETAILS[selectedAgent.persona]?.role || 'Specialized neural trading agent.'}"
+                                        "{parseMission(selectedAgent.task).summary}"
                                     </p>
                                     <p className="text-xs text-white/50 mt-2 leading-relaxed">
-                                        {PERSONA_DETAILS[selectedAgent.persona]?.strategy || 'Autonomous strategy execution based on localized regime optimizations.'}
+                                        Specialty: {selectedAgent.specialization || 'Adaptive market operations'}.
+                                        {` `}
+                                        Deliverable: {parseMission(selectedAgent.task).deliverable || 'Not specified'}.
+                                    </p>
+                                    <p className="text-xs text-white/50 mt-2 leading-relaxed">
+                                        Success metric: {parseMission(selectedAgent.task).success || 'Not specified'}.
+                                        {` `}
+                                        Handoff: {parseMission(selectedAgent.task).handoff || 'Orchestrator'}.
                                     </p>
                                 </div>
 
@@ -422,7 +421,7 @@ export default function RegimeDashboard() {
                                             <div className="w-2 h-2 rounded-full bg-green-500 mt-1" />
                                             <div>
                                                 <div className="text-[10px] font-mono text-white/30">{new Date(selectedAgent.spawn_time).toLocaleString()}</div>
-                                                <div className="text-xs text-white/80 mt-1">Initialization: Successful. Synced with {selectedAgent.regime_affinity} dominance.</div>
+                                                <div className="text-xs text-white/80 mt-1">Initialization: Joined team for {selectedAgent.regime_affinity} with mission handoff to {parseMission(selectedAgent.task).handoff || 'Orchestrator'}.</div>
                                             </div>
                                         </div>
                                         {selectedAgent.status === 'retired' ? (
