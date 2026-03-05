@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Layers, Database, Wifi } from "lucide-react";
+import { Brain, Database, Layers, Sparkles, Wifi } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import RegimeDashboard from "@/components/RegimeDashboard";
 
@@ -59,50 +59,54 @@ export default function Oracle() {
 
     return (
         <div className="min-h-screen bg-[#020202] text-white overflow-x-hidden relative font-sans">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(34,211,238,0.13),transparent_35%),radial-gradient(circle_at_82%_12%,rgba(20,184,166,0.12),transparent_38%)]" />
             <Navigation />
 
             <main className="pt-24 pb-20 relative z-10">
                 <div className="container mx-auto px-6 max-w-7xl">
 
-                    {/* Top Row: Mission Status & Neural Stream */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-                        <div className="md:col-span-3">
-                            <h1 className="text-4xl font-black tracking-tighter mb-2 flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
-                                    <Layers className="w-8 h-8" />
-                                </div>
-                                TEAM COMMAND DECK
-                            </h1>
-                            <p className="text-white/30 text-xs font-mono tracking-[0.3em] uppercase">
-                                Real-time Captain + Squad Coordination
-                            </p>
-                        </div>
-                        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 flex flex-col justify-center">
-                            <div className="text-[10px] text-white/30 font-mono uppercase tracking-widest mb-2 flex items-center gap-2">
-                                <Wifi className="w-3 h-3 text-green-400" /> Neural Stream
+                    <div className="mb-12 rounded-3xl border border-white/10 bg-black/35 p-6 md:p-8 backdrop-blur-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                            <div className="md:col-span-3">
+                                <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.24em] text-cyan-200/75">
+                                    <Sparkles className="w-3 h-3" />
+                                    Premium Roster Suite
+                                </p>
+                                <h1 className="text-4xl md:text-5xl font-black tracking-tight mb-2 flex items-center gap-3">
+                                    <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-300/20">
+                                        <Layers className="w-8 h-8" />
+                                    </div>
+                                    ORACLE LINEUP HQ
+                                </h1>
+                                <p className="text-white/55 text-sm max-w-2xl">
+                                    Captain view for starting lineup control, role quality, and full resume intelligence.
+                                </p>
                             </div>
-                            <div className="space-y-1">
-                                {logStream.map((log, i) => (
-                                    <motion.div
-                                        key={`${log}-${i}`}
-                                        initial={{ opacity: 0, x: 5 }}
-                                        animate={{ opacity: 1 - (i * 0.25), x: 0 }}
-                                        className="text-[9px] font-mono text-cyan-400/80"
-                                    >
-                                        &gt; {log}
-                                    </motion.div>
-                                ))}
+                            <div className="rounded-2xl border border-white/10 bg-black/40 p-4 flex flex-col justify-center">
+                                <div className="text-[10px] text-white/45 font-mono uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <Wifi className="w-3 h-3 text-emerald-300" /> Live Feed
+                                </div>
+                                <div className="space-y-1">
+                                    {logStream.map((log, i) => (
+                                        <motion.div
+                                            key={`${log}-${i}`}
+                                            initial={{ opacity: 0, x: 5 }}
+                                            animate={{ opacity: 1 - (i * 0.22), x: 0 }}
+                                            className="text-[10px] font-mono text-cyan-200/80"
+                                        >
+                                            &gt; {log}
+                                        </motion.div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Integrated Dashboard Components */}
                     <div className="grid grid-cols-1 gap-12">
-                        {/* Subagent Status Matrix */}
                         <section>
                             <div className="flex items-center gap-3 mb-6 flex-wrap">
-                                <Database className="w-5 h-5 text-indigo-400" />
-                                <h2 className="text-sm font-bold tracking-[0.2em] uppercase text-white/50">Core Team Pods</h2>
+                                <Database className="w-5 h-5 text-cyan-300" />
+                                <h2 className="text-sm font-bold tracking-[0.2em] uppercase text-white/60">Core Pod Telemetry</h2>
                                 <div className="h-px flex-1 bg-white/5" />
                                 <span className="text-[10px] font-mono px-2 py-1 rounded border border-green-500/30 text-green-300 bg-green-500/10">Active {activeCount}</span>
                                 <span className="text-[10px] font-mono px-2 py-1 rounded border border-white/10 text-white/50">Idle {idleCount}</span>
@@ -115,7 +119,6 @@ export default function Oracle() {
                             </div>
                         </section>
 
-                        {/* Dynamic team lifecycle dashboard */}
                         <RegimeDashboard />
                     </div>
                 </div>
@@ -124,8 +127,8 @@ export default function Oracle() {
             {/* Micro-monologue Stream - Bottom Fixed */}
             <div className="fixed bottom-0 left-0 right-0 h-10 border-t border-white/5 bg-black/80 backdrop-blur-xl z-50 flex items-center px-6 overflow-hidden">
                 <div className="flex items-center gap-6 text-[9px] text-white/30 font-mono w-full">
-                    <span className="flex items-center gap-2 text-purple-400/80">
-                        <div className="w-1 h-1 rounded-full bg-purple-500 animate-pulse" />
+                    <span className="flex items-center gap-2 text-cyan-300/80">
+                        <div className="w-1 h-1 rounded-full bg-cyan-300 animate-pulse" />
                         NODE_ACE_01: ONLINE
                     </span>
                     <span className="hidden md:flex items-center gap-2">
@@ -145,11 +148,11 @@ function SubagentCard({ agent }: { agent: any }) {
 
     return (
         <motion.div
-            whileHover={{ y: -4, backgroundColor: 'rgba(255,255,255,0.04)' }}
-            className="p-4 rounded-xl border border-white/5 bg-white/[0.02] transition-all relative group overflow-hidden"
+            whileHover={{ y: -4, backgroundColor: "rgba(255,255,255,0.04)" }}
+            className="p-4 rounded-2xl border border-white/10 bg-black/40 transition-all relative group overflow-hidden"
         >
             <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                <Brain className="w-12 h-12" />
+                <Brain className="w-14 h-14" />
             </div>
 
             <div className="flex items-center justify-between mb-3">
@@ -162,7 +165,7 @@ function SubagentCard({ agent }: { agent: any }) {
                 </div>
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-1 group-hover:text-purple-400 transition-colors">{agent.agent_name}</h3>
+            <h3 className="text-sm font-bold text-white mb-1 group-hover:text-cyan-300 transition-colors">{agent.agent_name}</h3>
             <p className="text-[10px] text-white/30 italic mb-4 truncate">"{agent.last_action || 'Synchronizing neural pathways...'}"</p>
 
             <div className="grid grid-cols-2 gap-2 mt-auto">
