@@ -102,6 +102,42 @@ const UNIVERSE = {
 const ALL_SYMBOLS = [...new Set(Object.values(UNIVERSE).flat())];
 const SECTOR_NAMES = Object.keys(UNIVERSE);
 
+type OperatorMindset = "defensive" | "balanced" | "aggressive";
+
+const MINDSET_PROFILES: Record<OperatorMindset, {
+  allocationMultiplier: number;
+  minCashBufferRatio: number;
+  maxOpenPositions: number;
+  buyConvictionFloor: number;
+  promptLabel: string;
+}> = {
+  defensive: {
+    allocationMultiplier: 0.65,
+    minCashBufferRatio: 0.25,
+    maxOpenPositions: 8,
+    buyConvictionFloor: 0.88,
+    promptLabel: "capital preservation mode (defensive)"
+  },
+  balanced: {
+    allocationMultiplier: 1,
+    minCashBufferRatio: 0.15,
+    maxOpenPositions: 15,
+    buyConvictionFloor: 0.8,
+    promptLabel: "balanced mode"
+  },
+  aggressive: {
+    allocationMultiplier: 1.35,
+    minCashBufferRatio: 0.1,
+    maxOpenPositions: 20,
+    buyConvictionFloor: 0.75,
+    promptLabel: "offensive mode (aggressive)"
+  }
+};
+
+function normalizeMindset(raw: unknown): OperatorMindset {
+  return raw === "defensive" || raw === "aggressive" ? raw : "balanced";
+}
+
 function isMarketOpen(): boolean {
   const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
   const day = nowNY.getDay();
@@ -172,6 +208,9 @@ serve(async (req) => {
       .select("config")
       .eq("agent_name", "Swarm Orchestrator")
       .maybeSingle();
+
+    const operatorMindset = normalizeMindset(orchestratorState?.config?.operator_mindset);
+    const mindsetProfile = MINDSET_PROFILES[operatorMindset];
 
     const lastDiscordAt = orchestratorState?.config?.last_discord_at
       ? new Date(orchestratorState.config.last_discord_at).getTime()
@@ -283,9 +322,12 @@ serve(async (req) => {
       allocationPct = allocationPct * 0.25; // Slash by 75% on down days
     }
 
+    allocationPct = allocationPct * mindsetProfile.allocationMultiplier;
+
     const maxAllocation = equity * allocationPct;
-    const minCashBuffer = equity * 0.15;
-    const maxOpenPositions = 15; // Hard cap on number of positions
+    const minCashBuffer = equity * mindsetProfile.minCashBufferRatio;
+    const maxOpenPositions = mindsetProfile.maxOpenPositions; // Hard cap on number of positions
+    const buyConvictionFloor = mindsetProfile.buyConvictionFloor;
     const isAtPositionCap = posArr.length >= maxOpenPositions;
 
     // ═══════════════════════════════════════════════════
@@ -320,6 +362,7 @@ serve(async (req) => {
           role: "system",
           content: `You are the Omni-Brain of ACE_OS, an elite algorithmic and macro-aware trading system on Alpaca.
 You make REAL trades with real money. You must be RUTHLESSLY STRATEGIC, DIVERSIFIED, and CONTEXT-AWARE.
+Operator mindset is ${operatorMindset.toUpperCase()} (${mindsetProfile.promptLabel}). Reflect this in position sizing and caution.
 
 ═══ MARKET MODE & GEOPOLITICS ═══
 Market is currently: ${marketOpen ? "OPEN (DAY TRADING MODE)" : "CLOSED (PREP MODE)"}.
@@ -336,7 +379,7 @@ GEOPOLITICAL CATALYSTS: You MUST trade based on major world events.
 2. EXPOSURE: ${diversificationNote}. NEVER let a single sector cross 30%.
 3. RISK MANAGEMENT: Daily P&L is ${dailyPnl < 0 ? "NEGATIVE. Capital preservation is active. Allocation slashed." : "positive. Normal allocation active."}
    - Max spend per trade: $${maxAllocation.toFixed(0)}.
-   - Need >= 0.8 conviction to buy (strict).
+   - Need >= ${buyConvictionFloor.toFixed(2)} conviction to buy (strict).
 
 4. LOSS REFLECTION:
    ${lossReflection}
@@ -356,7 +399,7 @@ Return valid JSON ONLY (no markdown blocks inside the JSON):
 
 - Calculate qty: floor(allocation / price).
 - NEVER buy if you already hold the ticker. Always diversify.
-- If no high-conviction (>0.8) trades exist, return an empty "trades" array.`
+- If no high-conviction (> ${buyConvictionFloor.toFixed(2)}) trades exist, return an empty "trades" array.`
         },
         {
           role: "user",
@@ -403,7 +446,7 @@ Execute strategy.`
       let tradeQty = Math.max(1, Math.min(trade.qty || 1, 50));
 
       // Skip low conviction (strictly enforced)
-      if (conviction < 0.8 && action === "BUY") {
+      if (conviction < buyConvictionFloor && action === "BUY") {
         executionResults.push({ symbol: sym, status: "SKIPPED", reason: `Low conviction for BUY: ${conviction}` });
         continue;
       }
@@ -555,9 +598,13 @@ Execute strategy.`
     await supabase.from("agent_logs").insert({
       agent_name: "Swarm Orchestrator",
       log_type: "decision",
-      message: `Cycle complete: ${executionResults.length} actions | Scanned ${scanSymbols.length} symbols | Mode: ${marketOpen ? "HYPER" : "PREP"}`,
+      message: `Cycle complete: ${executionResults.length} actions | Scanned ${scanSymbols.length} symbols | Mode: ${marketOpen ? "HYPER" : "PREP"} | Mindset: ${operatorMindset.toUpperCase()}`,
       reasoning: brain.thesis || brain.market_outlook || "",
-      metadata: { executionResults, brain_summary: { outlook: brain.market_outlook, health: brain.portfolio_health, thesis: brain.thesis } }
+      metadata: {
+        executionResults,
+        mindset: operatorMindset,
+        brain_summary: { outlook: brain.market_outlook, health: brain.portfolio_health, thesis: brain.thesis }
+      }
     });
 
     // ═══════════════════════════════════════════════════
@@ -600,6 +647,7 @@ Execute strategy.`
           title: `📊 ACE_OS — Intelligence Brief`,
           description: [
             `**Mode:** ${marketOpen ? "🔥 DAY TRADING (Market Open)" : "🌙 PREP MODE (Market Closed)"}`,
+            `**Mindset:** ${operatorMindset.toUpperCase()} (${mindsetProfile.promptLabel})`,
             `**Symbols Scanned:** ${scanSymbols.length}/${ALL_SYMBOLS.length}`,
             "",
             "━━━ **PORTFOLIO** ━━━",
@@ -635,6 +683,7 @@ Execute strategy.`
     return new Response(JSON.stringify({
       success: true,
       mode: marketOpen ? "HYPER" : "PREP",
+      mindset: operatorMindset,
       scanned: scanSymbols.length,
       trades: executionResults,
       outlook: brain.market_outlook,

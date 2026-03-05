@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Brain, Layers, Database, Wifi } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import RegimeDashboard from "@/components/RegimeDashboard";
+import SwarmMindsetControls from "@/components/SwarmMindsetControls";
 
 const STREAMS = [
     "CAPTAIN_BOOTSTRAP_COMPLETE...",
@@ -98,6 +99,8 @@ export default function Oracle() {
 
                     {/* Integrated Dashboard Components */}
                     <div className="grid grid-cols-1 gap-12">
+                        <SwarmMindsetControls />
+
                         {/* Subagent Status Matrix */}
                         <section>
                             <div className="flex items-center gap-3 mb-6 flex-wrap">

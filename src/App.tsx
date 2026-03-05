@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import { FloatingStatusBar } from "./components/FloatingStatusBar";
 import { HandshakeOverlay } from "./components/HandshakeOverlay";
 import Oracle from "./pages/Oracle";
+import PwaInstallButton from "./components/PwaInstallButton";
 
 const queryClient = new QueryClient();
 
@@ -22,7 +23,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Navigation />
+        <HandshakeOverlay />
         <FloatingStatusBar />
+        <PwaInstallButton />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/arena" element={<AgentArena />} />
