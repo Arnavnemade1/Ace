@@ -25,6 +25,7 @@ export class RegimeOracle {
     private apiKey = process.env.LOVABLE_API_KEY;
     private baseUrl = 'https://ai.gateway.lovable.dev/v1/chat/completions';
     private readonly TARGET_TEAM_SIZE = 3;
+    private readonly genericNamePattern = /(momentum|intraday|day trader|trader|chaser|sniper|scalper|harvester|hunter|bot|agent\s*\d*|alpha seeker|quant bot)/i;
 
     /**
      * Brainstorms the ideal swarm configuration based on the current regime and pulse.
@@ -48,6 +49,7 @@ Critical constraints:
 3. Every assignment must be useful: include a concrete deliverable and measurable success metric.
 4. Team coordination matters: each subagent must state who they hand off to in the team.
 5. Use concise but technical language.
+6. Forbidden name styles: "Momentum Chaser", "Intraday Trader", "Scalper", "Agent 1", or similar templates.
 
 Return valid JSON ONLY in this shape:
 {
@@ -89,29 +91,32 @@ Define the optimal team roster for this exact cycle.`;
                 ? parsed
                 : (parsed?.agents || parsed?.team || parsed?.subagents || []);
 
-            return this.normalizeCrew(rawAgents, regime);
+            return this.normalizeCrew(rawAgents, regime, pulse);
 
         } catch (e: any) {
             console.error('[RegimeOracle] Swarm Brainstorm failed:', e.message);
-            return this.getFallbackCrew(this.currentRegime?.regime_type || 'low-vol-trend');
+            return this.buildSyntheticCrew(this.currentRegime || {
+                regime_type: 'low-vol-trend',
+                confidence: 0.5,
+                macro_factors: { spy_volatililty: 0.1, market_correlation: 0.5, sentiment_velocity: 0.1 }
+            }, pulse);
         }
     }
 
-    private normalizeCrew(rawAgents: any[], regime: RegimeState): DynamicPersona[] {
+    private normalizeCrew(rawAgents: any[], regime: RegimeState, pulse: any): DynamicPersona[] {
         const seenNames = new Set<string>();
-        const fallback = this.getFallbackCrew(regime.regime_type);
         const normalized: DynamicPersona[] = [];
 
         const source = Array.isArray(rawAgents) ? rawAgents : [];
         for (let i = 0; i < source.length && normalized.length < this.TARGET_TEAM_SIZE; i++) {
             const candidate = source[i] || {};
-            const fallbackAgent = fallback[normalized.length];
-            const name = this.makeUniqueName(candidate.name, seenNames, normalized.length + 1, fallbackAgent.name);
-            const specialization = this.cleanLine(candidate.specialization, fallbackAgent.specialization);
+            const synthetic = this.synthesizeAgent(normalized.length + 1, regime, pulse, seenNames);
+            const name = this.makeUniqueName(candidate.name, seenNames, normalized.length + 1, synthetic.name);
+            const specialization = this.cleanLine(candidate.specialization, synthetic.specialization);
 
             const usefulTask = this.ensureUsefulTask(
                 this.cleanLine(candidate.task, ''),
-                fallbackAgent.task
+                synthetic.task
             );
             const deliverable = this.cleanLine(candidate.deliverable, `ranked watchlist + action notes for ${name}`);
             const successMetric = this.cleanLine(candidate.success_metric, '>=2 high-conviction opportunities with quantified risk');
@@ -124,7 +129,8 @@ Define the optimal team roster for this exact cycle.`;
             });
         }
 
-        for (const fb of fallback) {
+        const syntheticFallback = this.buildSyntheticCrew(regime, pulse, seenNames);
+        for (const fb of syntheticFallback) {
             if (normalized.length >= this.TARGET_TEAM_SIZE) break;
             const fallbackName = this.makeUniqueName(fb.name, seenNames, normalized.length + 1, `Adaptive Unit ${normalized.length + 1}`);
             normalized.push({ ...fb, name: fallbackName });
@@ -138,7 +144,8 @@ Define the optimal team roster for this exact cycle.`;
             .replace(/[^a-zA-Z0-9\- ]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
-        const base = cleaned || `Adaptive Unit ${index}`;
+        const isGeneric = this.genericNamePattern.test(cleaned) || cleaned.split(' ').length < 2;
+        const base = !cleaned || isGeneric ? fallback : cleaned;
 
         let candidate = base;
         let suffix = 2;
@@ -162,32 +169,70 @@ Define the optimal team roster for this exact cycle.`;
         const normalized = task.toLowerCase();
         const hasActionVerb = /(scan|monitor|rank|hedge|rebalance|detect|execute|validate|triage|screen|model|optimize|track|stress|compare|prioritize|route)/.test(normalized);
         const hasTradingTarget = /(symbol|position|sector|risk|volatility|sentiment|spread|entry|exit|liquidity|correlation|drawdown|order)/.test(normalized);
+        const hasMeasurableOutput = /(\d+|%|deliverable|success|metric|threshold|score|risk\/reward|rr|var)/.test(normalized);
+        const genericTask = /(trade stocks|find opportunities|monitor market|do analysis|watchlist only|make money)/.test(normalized);
 
-        if (task.length >= 36 && hasActionVerb && hasTradingTarget) {
+        if (task.length >= 36 && hasActionVerb && hasTradingTarget && hasMeasurableOutput && !genericTask) {
             return task;
         }
 
         return fallback;
     }
 
-    private getFallbackCrew(regimeType: MarketRegimeType): DynamicPersona[] {
-        return [
-            {
-                name: 'Pulse Cartographer',
-                specialization: 'Cross-asset momentum mapping',
-                task: `Scan sovereign-priority symbols and rank top 12 momentum dislocations for ${regimeType}. Deliverable: ranked setup board with entry/exit bands. Success: >=3 setups with risk/reward >= 2.0. Handoff: Risk Sentinel.`
-            },
-            {
-                name: 'Risk Sentinel',
-                specialization: 'Drawdown and exposure control',
-                task: 'Stress-test each candidate setup against sector concentration, stop distance, and account VaR. Deliverable: go/no-go gate with sizing bounds. Success: every approved setup fits cash buffer and max sector exposure rules. Handoff: Execution Relay.'
-            },
-            {
-                name: 'Execution Relay',
-                specialization: 'Liquidity-aware execution routing',
-                task: 'Convert approved setups into execution-ready orders with timing, order type, and slippage controls. Deliverable: final order queue with priorities. Success: zero rule violations and all orders mapped to valid market conditions. Handoff: Orchestrator.'
-            }
+    private buildSyntheticCrew(regime: RegimeState, pulse: any, seenNames?: Set<string>): DynamicPersona[] {
+        const localSeen = seenNames || new Set<string>();
+        const crew: DynamicPersona[] = [];
+        for (let i = 1; i <= this.TARGET_TEAM_SIZE; i++) {
+            const unit = this.synthesizeAgent(i, regime, pulse, localSeen);
+            crew.push(unit);
+            localSeen.add(unit.name.toLowerCase());
+        }
+        return crew;
+    }
+
+    private synthesizeAgent(index: number, regime: RegimeState, pulse: any, seenNames: Set<string>): DynamicPersona {
+        const regimeSeed = `${regime.regime_type}-${index}-${Math.round((pulse?.newsSentiment || 0.5) * 100)}`;
+        const themesByRegime: Record<MarketRegimeType, string[]> = {
+            'high-vol-reversion': ['Vol', 'Mean', 'Gamma', 'Shock', 'Tail'],
+            'low-vol-trend': ['Trend', 'Flow', 'Carry', 'Drift', 'Signal'],
+            'quiet-accumulation': ['Accum', 'Delta', 'Layer', 'Gradual', 'Base'],
+            'crisis-transition': ['Stress', 'Break', 'Pivot', 'Regime', 'Flux'],
+            'commodity-supercycle': ['Macro', 'Barrel', 'Curve', 'Energy', 'Basis'],
+        };
+        const nouns = ['Atlas', 'Relay', 'Vector', 'Forge', 'Sentinel', 'Map', 'Kernel', 'Circuit', 'Protocol'];
+        const themes = themesByRegime[regime.regime_type] || themesByRegime['low-vol-trend'];
+
+        const left = themes[this.hash(regimeSeed) % themes.length];
+        const right = nouns[this.hash(`${regimeSeed}-n`) % nouns.length];
+        const rawName = `${left} ${right}`;
+        const name = this.makeUniqueName(rawName, seenNames, index, `Adaptive Unit ${index}`);
+
+        const specializations = [
+            'Cross-sectional dislocation scoring',
+            'Liquidity-aware execution planning',
+            'Drawdown-constrained position sizing',
+            'News-sentiment shock integration',
+            'Correlation and sector exposure control',
+            'Intracycle risk/reward normalization'
         ];
+        const specialization = specializations[this.hash(`${regimeSeed}-s`) % specializations.length];
+
+        const topN = 8 + (this.hash(`${regimeSeed}-k`) % 8);
+        const rr = (1.8 + (this.hash(`${regimeSeed}-r`) % 8) * 0.1).toFixed(1);
+        const handoffTargets = ['Risk Lead', 'Execution Lead', 'Orchestrator'];
+        const handoff = handoffTargets[this.hash(`${regimeSeed}-h`) % handoffTargets.length];
+        const mission = `Rank top ${topN} symbols aligned to ${regime.regime_type} using sentiment velocity and volatility filters; propose entry, stop, and invalidation levels. Deliverable: prioritized action board with sizing caps. Success: >=3 setups with risk/reward >= ${rr} and no sector concentration breach. Handoff: ${handoff}.`;
+
+        return { name, specialization, task: mission };
+    }
+
+    private hash(input: string): number {
+        let h = 0;
+        for (let i = 0; i < input.length; i++) {
+            h = (h << 5) - h + input.charCodeAt(i);
+            h |= 0;
+        }
+        return Math.abs(h);
     }
 
     async estimateRegime(pulse: any): Promise<RegimeState> {
