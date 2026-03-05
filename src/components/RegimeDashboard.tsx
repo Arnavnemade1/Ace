@@ -274,6 +274,9 @@ export default function RegimeDashboard() {
                                                             <span className="text-[9px] font-mono text-green-400 opacity-60">[{(agent as any).specialization}]</span>
                                                         )}
                                                     </div>
+                                                    <div className="text-[9px] text-white/50 italic truncate max-w-[150px]">
+                                                        {(agent as any).task || 'Specialized mission active...'}
+                                                    </div>
                                                     <div className="text-[10px] text-white/40 font-mono truncate">ID: {agent.id.slice(0, 8)}</div>
                                                 </div>
                                                 <div className="text-right">

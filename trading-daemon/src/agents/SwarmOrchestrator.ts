@@ -3,6 +3,8 @@ import { StrategyEngine } from './StrategyEngine';
 import { RiskController } from './RiskController';
 import { PortfolioStreamer } from './PortfolioStreamer';
 import { OmniScanner } from './OmniScanner';
+import { RegimeOracle } from './RegimeOracle';
+import { PersonaManager } from './PersonaManager';
 import { DiscordDispatcher } from './DiscordDispatcher';
 import { logAgentAction } from '../supabase';
 import { alpaca } from '../alpaca';
@@ -23,6 +25,8 @@ export class SwarmOrchestrator {
     private risk = new RiskController();
     private portfolio = new PortfolioStreamer();
     private omni = new OmniScanner();
+    private oracle = new RegimeOracle();
+    private personas = new PersonaManager();
 
     private watchlist: string[] = [];
     private currentSectorIndex = 0;
@@ -173,6 +177,16 @@ export class SwarmOrchestrator {
         }
         const pulse = this.omni.getGlobalPulse();
         await logAgentAction('Orchestrator', 'info', 'Market Pulse Synthesized', pulse.macroSummary);
+
+        // 3.5 Dynamic Swarm Adaptation (Every 10 cycles or on shift)
+        if (this.cycleCounter % 10 === 1) {
+            await logAgentAction('Orchestrator', 'info', 'Brainstorming Swarm Configuration...');
+            const regime = await this.oracle.estimateRegime(pulse);
+            const instructions = await this.oracle.brainstormSwarm(pulse);
+            if (instructions.length > 0) {
+                await this.personas.adaptWithInstructions(regime, instructions);
+            }
+        }
 
         // 4. Strategy evaluation with full Market Pulse and Position Awareness
         await logAgentAction('Strategy Engine', 'info', 'Neural Strategy Synthesis in Progress...');
