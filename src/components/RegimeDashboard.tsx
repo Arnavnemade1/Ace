@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { motion } from "framer-motion";
-import { Activity, Award, Brain, Clock3, Crosshair, Flag, Globe, Radar, ShieldCheck, Skull, Sparkles, Target, TrendingUp } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+    RadialBarChart,
+    RadialBar,
+    ResponsiveContainer,
+    PolarAngleAxis
+} from "recharts";
+import { Brain, Activity, Target, Zap, Clock, Skull, X, Shield, Globe, Cpu } from "lucide-react";
 
 interface Regime {
     regime_type: string;
@@ -13,26 +19,24 @@ interface Regime {
 interface AgentLifecycle {
     id: string;
     persona: string;
-    status: "born" | "active" | "retired";
+    status: 'born' | 'active' | 'retired';
     regime_affinity: string;
     spawn_time: string;
     death_time: string | null;
     death_reason: string | null;
     task?: string;
     specialization?: string;
-    created_at?: string;
 }
 
 const REGIME_COLORS: Record<string, string> = {
-    "high-vol-reversion": "#f97316",
-    "low-vol-trend": "#22c55e",
-    "quiet-accumulation": "#38bdf8",
-    "crisis-transition": "#ef4444",
-    "commodity-supercycle": "#eab308",
+    'high-vol-reversion': '#ef4444',     // Red
+    'low-vol-trend': '#10b981',        // Green
+    'quiet-accumulation': '#6366f1',   // Indigo
+    'crisis-transition': '#eab308',    // Yellow
+    'commodity-supercycle': '#f97316'  // Orange
 };
 
-const ICONS = [Brain, Target, TrendingUp, ShieldCheck, Radar, Sparkles, Crosshair, Globe];
-const LINEUP_ROLES = ["Captain", "Co-Captain", "Tactical Lead", "Execution Lead", "Risk Anchor"];
+const TEAM_ICON_POOL = [Brain, Activity, Shield, Cpu, Target, Zap, Globe];
 
 function hashText(value: string): number {
     let hash = 0;
@@ -43,90 +47,91 @@ function hashText(value: string): number {
     return Math.abs(hash);
 }
 
-function pickIcon(name: string, specialization?: string) {
-    const idx = hashText(`${name}|${specialization || ""}`) % ICONS.length;
-    return ICONS[idx] || Brain;
+function pickPersonaIcon(persona: string, specialization?: string) {
+    const idx = hashText(`${persona}|${specialization || ''}`) % TEAM_ICON_POOL.length;
+    return TEAM_ICON_POOL[idx] || Brain;
 }
 
 function parseMission(task?: string) {
-    const mission = String(task || "").trim();
+    const mission = String(task || '').trim();
     const deliverable = mission.match(/Deliverable:\s*([^.]*)/i)?.[1]?.trim();
     const success = mission.match(/Success:\s*([^.]*)/i)?.[1]?.trim();
     const handoff = mission.match(/Handoff:\s*([^.]*)/i)?.[1]?.trim();
-    const summary = mission.replace(/\s*Deliverable:.*$/i, "").trim() || "Adaptive mission assigned by the captain.";
+    const summary = mission.replace(/\s*Deliverable:.*$/i, '').trim() || 'Adaptive mission assigned by Orchestrator.';
+
     return { summary, deliverable, success, handoff };
 }
 
 function isGenericPersonaName(name?: string) {
-    const n = String(name || "").trim().toLowerCase();
+    const n = String(name || '').trim().toLowerCase();
     if (!n) return true;
     return /(momentum|intraday|trader|scalper|chaser|sniper|harvester|hunter|agent\s*\d*)/.test(n);
 }
 
-function personaLabel(agent: Pick<AgentLifecycle, "persona" | "id" | "regime_affinity" | "specialization">) {
-    const original = String(agent.persona || "").trim();
+function personaLabel(agent: Pick<AgentLifecycle, 'persona' | 'id' | 'regime_affinity' | 'specialization'>) {
+    const original = String(agent.persona || '').trim();
     if (!isGenericPersonaName(original)) return original;
 
-    const left = ["Vector", "Atlas", "Signal", "Pulse", "Flux", "Kernel", "Aegis", "Vertex"];
-    const right = ["Protocol", "Relay", "Sentinel", "Circuit", "Ledger", "Forge", "Pilot", "Matrix"];
-    const seed = hashText(`${agent.id}|${agent.regime_affinity}|${agent.specialization || ""}`);
-    return `${left[seed % left.length]} ${right[(seed >> 3) % right.length]} ${agent.id.slice(0, 4).toUpperCase()}`;
-}
-
-function timeSince(iso: string) {
-    const ms = Date.now() - new Date(iso).getTime();
-    const mins = Math.max(1, Math.floor(ms / 60000));
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 48) return `${hrs}h`;
-    return `${Math.floor(hrs / 24)}d`;
+    const leftTokens = ['Vector', 'Atlas', 'Signal', 'Pulse', 'Flux', 'Grid', 'Kernel', 'Vertex'];
+    const rightTokens = ['Protocol', 'Relay', 'Sentinel', 'Circuit', 'Map', 'Forge', 'Ledger', 'Pilot'];
+    const seed = hashText(`${agent.id}|${agent.regime_affinity}|${agent.specialization || ''}`);
+    const left = leftTokens[seed % leftTokens.length];
+    const right = rightTokens[(seed >> 3) % rightTokens.length];
+    return `${left} ${right} ${agent.id.slice(0, 4).toUpperCase()}`;
 }
 
 export default function RegimeDashboard() {
     const [currentRegime, setCurrentRegime] = useState<Regime | null>(null);
     const [agents, setAgents] = useState<AgentLifecycle[]>([]);
-    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-    const [selectedAgentLogs, setSelectedAgentLogs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [selectedAgent, setSelectedAgent] = useState<AgentLifecycle | null>(null);
+    const [selectedAgentLogs, setSelectedAgentLogs] = useState<any[]>([]);
     const [fetchingLogs, setFetchingLogs] = useState(false);
 
     useEffect(() => {
         const fetchState = async () => {
+            // Fetch latest regime
             const { data: regimeData } = await (supabase as any)
-                .from("market_regimes")
-                .select("*")
-                .order("created_at", { ascending: false })
+                .from('market_regimes')
+                .select('*')
+                .order('created_at', { ascending: false })
                 .limit(1)
                 .single();
             if (regimeData) setCurrentRegime(regimeData as Regime);
 
+            // Fetch recent agents (active + recently retired)
             const { data: agentData } = await (supabase as any)
-                .from("agent_lifecycles")
-                .select("*")
-                .order("created_at", { ascending: false })
-                .limit(30);
+                .from('agent_lifecycles')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(10);
             if (agentData) setAgents(agentData as AgentLifecycle[]);
+
             setLoading(false);
         };
 
         fetchState();
 
+        // Subscribe to real-time changes
         const regimeSub = supabase
-            .channel("regime_updates")
-            .on("postgres_changes", { event: "INSERT", schema: "public", table: "market_regimes" }, (payload) => {
+            .channel('regime_updates')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'market_regimes' }, (payload) => {
                 setCurrentRegime(payload.new as Regime);
             })
             .subscribe();
 
         const agentSub = supabase
-            .channel("agent_updates")
-            .on("postgres_changes", { event: "*", schema: "public", table: "agent_lifecycles" }, async () => {
-                const { data } = await (supabase as any)
-                    .from("agent_lifecycles")
-                    .select("*")
-                    .order("created_at", { ascending: false })
-                    .limit(30);
-                if (data) setAgents(data as AgentLifecycle[]);
+            .channel('agent_updates')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_lifecycles' }, (payload) => {
+                setAgents(prev => {
+                    if (payload.eventType === 'INSERT') {
+                        return [payload.new as AgentLifecycle, ...prev].slice(0, 10);
+                    }
+                    if (payload.eventType === 'UPDATE') {
+                        return prev.map(a => a.id === payload.new.id ? payload.new as AgentLifecycle : a);
+                    }
+                    return prev;
+                });
             })
             .subscribe();
 
@@ -136,226 +141,358 @@ export default function RegimeDashboard() {
         };
     }, []);
 
-    const activeAgents = useMemo(
-        () => agents.filter((a) => a.status !== "retired").sort((a, b) => new Date(b.spawn_time).getTime() - new Date(a.spawn_time).getTime()),
-        [agents]
-    );
-    const retiredAgents = useMemo(
-        () => agents.filter((a) => a.status === "retired").sort((a, b) => new Date(b.spawn_time).getTime() - new Date(a.spawn_time).getTime()).slice(0, 8),
-        [agents]
-    );
-
-    useEffect(() => {
-        if (selectedAgentId) return;
-        if (activeAgents.length > 0) setSelectedAgentId(activeAgents[0].id);
-        else if (retiredAgents.length > 0) setSelectedAgentId(retiredAgents[0].id);
-    }, [activeAgents, retiredAgents, selectedAgentId]);
-
-    const selectedAgent = useMemo(
-        () => agents.find((a) => a.id === selectedAgentId) || null,
-        [agents, selectedAgentId]
-    );
-
     useEffect(() => {
         const fetchAgentLogs = async () => {
             if (!selectedAgent) return;
             setFetchingLogs(true);
+
+            // Fetch logs attributed to this specific persona or general activity logs
             const { data } = await supabase
-                .from("agent_logs")
-                .select("*")
-                .or(`agent_name.eq.${selectedAgent.persona},message.ilike.%${selectedAgent.persona}%`)
-                .order("created_at", { ascending: false })
-                .limit(6);
+                .from('agent_logs')
+                .select('*')
+                .or(`agent_name.eq.${selectedAgent.persona},message.ilike.%${selectedAgent.persona}%,log_type.eq.decision`)
+                .order('created_at', { ascending: false })
+                .limit(5);
+
             setSelectedAgentLogs(data || []);
             setFetchingLogs(false);
         };
+
         fetchAgentLogs();
     }, [selectedAgent]);
 
     if (loading) {
-        return <div className="h-64 flex items-center justify-center text-white/40">Loading lineup...</div>;
+        return <div className="h-64 flex items-center justify-center text-white/50">Synchronizing Oracle...</div>;
     }
 
-    const regimeName = currentRegime?.regime_type?.replace(/-/g, " ").toUpperCase() || "UNKNOWN";
-    const confidence = Math.round((currentRegime?.confidence || 0) * 100);
-    const regimeColor = currentRegime ? REGIME_COLORS[currentRegime.regime_type] || "#22d3ee" : "#22d3ee";
+    const regimeName = currentRegime?.regime_type?.replace(/-/g, ' ').toUpperCase() || 'UNKNOWN STATE';
+    const regimeColor = currentRegime ? REGIME_COLORS[currentRegime.regime_type] || '#ec4899' : '#333';
+    const confidence = currentRegime ? Math.round(currentRegime.confidence * 100) : 0;
+
+    const chartData = [
+        { name: "Confidence", value: confidence, fill: regimeColor }
+    ];
+
+    const activeAgents = agents.filter(a => a.status !== 'retired');
+    const retiredAgents = agents.filter(a => a.status === 'retired').slice(0, 4);
 
     return (
-        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#071019] via-[#06070b] to-[#11111a] p-6 md:p-10">
-            <div className="pointer-events-none absolute -top-28 -left-20 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-24 -right-20 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
+        <section className="py-20 relative bg-[#050505] border-t border-white/5">
+            <div className="container mx-auto px-6 max-w-7xl">
 
-            <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                    <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.35em] text-cyan-300/70">Oracle Franchise</p>
-                    <h2 className="text-3xl font-black tracking-tight text-white md:text-4xl">Starting Lineup</h2>
-                    <p className="mt-2 max-w-2xl text-sm text-white/55">
-                        Live roster cards, with a full resume for each agent including mission mandate, deliverables, and execution trail.
+                <div className="mb-12">
+                    <h2 className="text-3xl font-display font-black tracking-tighter flex items-center gap-3">
+                        <Activity className="w-8 h-8 text-[#ec4899]" />
+                        Market Regime Oracle
+                    </h2>
+                    <p className="text-white/40 font-mono text-sm mt-2 max-w-2xl">
+                        Live squad management layer. The captain can commission any specialist team profile, then rotate the roster as market conditions evolve.
                     </p>
                 </div>
-                <div className="rounded-2xl border border-white/15 bg-black/40 px-4 py-3">
-                    <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-white/45">Current Regime</div>
-                    <div className="mt-1 flex items-center gap-3">
-                        <span className="text-sm font-bold" style={{ color: regimeColor }}>{regimeName}</span>
-                        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-mono text-white/75">{confidence}%</span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full" style={{ width: `${confidence}%`, backgroundColor: regimeColor }} />
-                    </div>
-                </div>
-            </div>
 
-            <div className="grid gap-6 lg:grid-cols-12">
-                <div className="lg:col-span-8">
-                    <div className="mb-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.22em] text-white/45">
-                            <Award className="h-4 w-4 text-emerald-300" />
-                            Active Five
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* LEFT COLUMN: Regime Gauge */}
+                    <div className="col-span-1 bg-white/[0.02] border border-white/5 rounded-2xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[350px]">
+                        <div className="absolute top-4 left-4 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                            <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">Live Feed</span>
                         </div>
-                        <div className="text-xs font-mono text-white/40">{activeAgents.length} active</div>
-                    </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                        {activeAgents.slice(0, 6).map((agent, index) => {
-                            const label = personaLabel(agent);
-                            const Icon = pickIcon(label, agent.specialization);
-                            const mission = parseMission(agent.task);
-                            const isSelected = selectedAgentId === agent.id;
-                            return (
-                                <motion.button
-                                    key={agent.id}
-                                    whileHover={{ y: -4 }}
-                                    onClick={() => setSelectedAgentId(agent.id)}
-                                    className={`group relative overflow-hidden rounded-2xl border p-4 text-left transition ${isSelected ? "border-cyan-300/60 bg-cyan-500/10" : "border-white/10 bg-black/35 hover:border-white/25"}`}
+                        <div className="h-48 w-full mt-6">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <RadialBarChart
+                                    cx="50%" cy="50%"
+                                    innerRadius="70%" outerRadius="100%"
+                                    barSize={15}
+                                    data={chartData}
+                                    startAngle={180} endAngle={0}
                                 >
-                                    <div className="mb-3 flex items-center justify-between">
-                                        <span className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] font-mono uppercase tracking-[0.18em] text-white/60">
-                                            {LINEUP_ROLES[index] || `Unit ${index + 1}`}
-                                        </span>
-                                        <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-300">
-                                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                                            Ready
-                                        </span>
-                                    </div>
-                                    <div className="mb-2 flex items-center gap-3">
-                                        <div className="rounded-xl border border-white/10 bg-black/40 p-2">
-                                            <Icon className="h-5 w-5 text-cyan-200" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <h3 className="truncate text-lg font-bold text-white">{label}</h3>
-                                            <p className="truncate text-xs text-white/45">{agent.specialization || "Adaptive market operations"}</p>
-                                        </div>
-                                    </div>
-                                    <p className="line-clamp-2 text-sm text-white/70">{mission.summary}</p>
-                                    <div className="mt-3 text-[11px] font-mono text-white/40">Tenure: {timeSince(agent.spawn_time)}</div>
-                                </motion.button>
-                            );
-                        })}
-                        {activeAgents.length === 0 && (
-                            <div className="col-span-full rounded-2xl border border-white/10 bg-black/25 p-8 text-center text-white/35">
-                                No active lineup available.
+                                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                                    <RadialBar
+                                        background={{ fill: 'rgba(255,255,255,0.03)' }}
+                                        dataKey="value"
+                                        cornerRadius={15}
+                                        label={false}
+                                        animationDuration={1500}
+                                        isAnimationActive={true}
+                                    />
+                                </RadialBarChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        <div className="text-center -mt-16 z-10">
+                            <div className="text-[10px] text-white/40 uppercase tracking-[0.2em] mb-1">Current State</div>
+                            <h3 className="text-2xl font-black font-display tracking-tight" style={{ color: regimeColor }}>
+                                {regimeName}
+                            </h3>
+                            <div className="text-3xl font-mono mt-1 font-black text-white">
+                                {confidence}% <span className="text-sm font-light text-white/30 tracking-normal">CONFIDENCE</span>
+                            </div>
+                        </div>
+
+                        {currentRegime && (
+                            <div className="w-full mt-8 p-4 bg-black/40 rounded-xl border border-white/5 backdrop-blur-md">
+                                <div className="flex justify-between text-xs font-mono text-white/50 mb-2">
+                                    <span>Volatility (SPY)</span>
+                                    <span className="text-white">{(currentRegime.macro_factors?.spy_volatililty * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className="flex justify-between text-xs font-mono text-white/50">
+                                    <span>Sentiment Shift</span>
+                                    <span className="text-white">{currentRegime.macro_factors?.sentiment_velocity?.toFixed(2)}</span>
+                                </div>
                             </div>
                         )}
                     </div>
 
-                    <div className="mt-7">
-                        <div className="mb-3 flex items-center gap-2 text-xs font-mono uppercase tracking-[0.22em] text-white/45">
-                            <Skull className="h-4 w-4 text-rose-300" />
-                            Bench History
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                            {retiredAgents.map((agent) => {
-                                const label = personaLabel(agent);
-                                const isSelected = selectedAgentId === agent.id;
-                                return (
-                                    <button
-                                        key={agent.id}
-                                        onClick={() => setSelectedAgentId(agent.id)}
-                                        className={`rounded-xl border px-4 py-3 text-left transition ${isSelected ? "border-rose-300/55 bg-rose-500/10" : "border-white/10 bg-black/25 hover:border-white/25"}`}
-                                    >
-                                        <div className="truncate text-sm font-bold text-white/80">{label}</div>
-                                        <div className="mt-1 truncate text-xs text-white/45">{agent.death_reason || "Retired from rotation"}</div>
-                                    </button>
-                                );
-                            })}
-                            {retiredAgents.length === 0 && (
-                                <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-xs text-white/35">
-                                    No retired members yet.
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                    {/* RIGHT COLUMN: Active and Retired Team Members */}
+                    <div className="col-span-1 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
 
-                <div className="lg:col-span-4">
-                    <div className="sticky top-24 rounded-2xl border border-white/15 bg-black/45 p-5 backdrop-blur-md">
-                        <div className="mb-4 flex items-center gap-2 text-xs font-mono uppercase tracking-[0.22em] text-white/45">
-                            <Flag className="h-4 w-4 text-cyan-300" />
-                            Agent Resume
-                        </div>
+                        {/* ACTIVE TEAM */}
+                        <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 flex flex-col h-[350px]">
+                            <h3 className="text-sm font-mono uppercase tracking-widest text-white/50 mb-6 flex items-center gap-2">
+                                <Zap className="w-4 h-4 text-green-400" />
+                                Active Team
+                                <span className="ml-auto bg-green-500/20 text-green-400 px-2 py-0.5 rounded text-[10px]">{activeAgents.length}</span>
+                            </h3>
 
-                        {!selectedAgent ? (
-                            <div className="rounded-xl border border-white/10 bg-black/30 p-5 text-sm text-white/35">
-                                Select a lineup card to open the resume.
-                            </div>
-                        ) : (
-                            <>
-                                <div className="mb-4 rounded-xl border border-white/10 bg-gradient-to-br from-white/10 to-white/0 p-4">
-                                    <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/45">{selectedAgent.status === "retired" ? "Retired" : "Starting Lineup"}</div>
-                                    <h3 className="mt-1 text-xl font-black text-white">{personaLabel(selectedAgent)}</h3>
-                                    <p className="mt-1 text-xs text-white/55">{selectedAgent.specialization || "Adaptive market operations"}</p>
-                                </div>
-
-                                <div className="space-y-3 text-sm">
-                                    <ResumeRow label="Regime Affinity" value={selectedAgent.regime_affinity.replace(/-/g, " ")} />
-                                    <ResumeRow label="Joined" value={new Date(selectedAgent.spawn_time).toLocaleString()} />
-                                    <ResumeRow label="Tenure" value={timeSince(selectedAgent.spawn_time)} />
-                                </div>
-
-                                <div className="my-4 h-px bg-white/10" />
-                                <ResumeBlock icon={Target} title="Mission Statement" body={parseMission(selectedAgent.task).summary} />
-                                <ResumeBlock icon={Activity} title="Deliverable" body={parseMission(selectedAgent.task).deliverable || "Not specified"} />
-                                <ResumeBlock icon={ShieldCheck} title="Success Metric" body={parseMission(selectedAgent.task).success || "Not specified"} />
-                                <ResumeBlock icon={Clock3} title="Handoff Chain" body={parseMission(selectedAgent.task).handoff || "Orchestrator"} />
-
-                                <div className="my-4 h-px bg-white/10" />
-                                <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/40">Recent Notes</div>
-                                <div className="mt-2 space-y-2">
-                                    {fetchingLogs && <div className="text-xs text-white/30">Loading notes...</div>}
-                                    {!fetchingLogs && selectedAgentLogs.length === 0 && <div className="text-xs text-white/30">No recent notes available.</div>}
-                                    {selectedAgentLogs.map((log, i) => (
-                                        <div key={i} className="rounded-lg border border-white/10 bg-black/30 p-2">
-                                            <div className="text-[10px] font-mono text-cyan-200/70">{new Date(log.created_at).toLocaleTimeString()}</div>
-                                            <div className="mt-1 line-clamp-2 text-xs text-white/70">{log.message}</div>
+                            <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                                <AnimatePresence>
+                                    {activeAgents.length === 0 && (
+                                        <div className="text-center text-white/20 text-xs py-10 font-mono italic">
+                                            Awaiting squad deployment...
                                         </div>
-                                    ))}
-                                </div>
-                            </>
-                        )}
+                                    )}
+                                    {activeAgents.map(agent => {
+                                        const displayName = personaLabel(agent);
+                                        const Icon = pickPersonaIcon(displayName, agent.specialization);
+                                        const mission = parseMission(agent.task);
+                                        return (
+                                            <motion.div
+                                                key={agent.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                onClick={() => setSelectedAgent(agent)}
+                                                className="p-3 bg-white/[0.03] border border-white/5 rounded-lg flex items-center gap-3 relative overflow-hidden group cursor-pointer hover:border-green-500/30 transition-all"
+                                            >
+                                                <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                <div className="p-2 bg-black/50 rounded-md">
+                                                    <Icon className="w-4 h-4 text-green-400" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-bold text-white truncate flex items-center gap-1">
+                                                        {displayName}
+                                                        {agent.specialization && (
+                                                            <span className="text-[9px] font-mono text-green-400 opacity-60">[{agent.specialization}]</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-[9px] text-white/50 italic truncate max-w-[150px]">
+                                                        {mission.summary}
+                                                    </div>
+                                                    <div className="text-[10px] text-white/40 font-mono truncate">ID: {agent.id.slice(0, 8)}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[10px] uppercase text-white/30 tracking-wider">Status</div>
+                                                    <div className="text-xs text-green-400 font-mono flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                                        In Play
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+
+                        {/* RETIRED TEAM */}
+                        <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 flex flex-col h-[350px]">
+                            <h3 className="text-sm font-mono uppercase tracking-widest text-white/50 mb-6 flex items-center gap-2">
+                                <Skull className="w-4 h-4 text-red-400" />
+                                Retired Members
+                                <span className="ml-auto text-white/20 text-[10px]">Recent Rotations</span>
+                            </h3>
+
+                            <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                                <AnimatePresence>
+                                    {retiredAgents.length === 0 && (
+                                        <div className="text-center text-white/20 text-xs py-10 font-mono italic">
+                                            No recent rotations.
+                                        </div>
+                                    )}
+                                    {retiredAgents.map(agent => {
+                                        const displayName = personaLabel(agent);
+                                        const Icon = pickPersonaIcon(displayName, agent.specialization);
+                                        return (
+                                            <motion.div
+                                                key={agent.id}
+                                                initial={{ opacity: 0, scale: 0.95 }}
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                onClick={() => setSelectedAgent(agent)}
+                                                className="p-3 bg-white/[0.01] border border-white/5 rounded-lg flex items-start gap-3 opacity-60 hover:opacity-100 hover:border-red-500/30 transition-all cursor-pointer"
+                                            >
+                                                <div className="p-2 bg-black/30 rounded-md grayscale">
+                                                    <Icon className="w-4 h-4 text-white/30" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-bold text-white/50 line-through truncate">{displayName}</div>
+                                                    <div className="text-[10px] text-white/30 font-mono mt-1 italic break-words leading-tight">
+                                                        "{agent.death_reason || 'Natural expiration'}"
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </div>
+
+            {/* Agent Detail Modal */}
+            <AnimatePresence>
+                {selectedAgent && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+                            onClick={() => setSelectedAgent(null)}
+                        />
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                            className="relative w-full max-w-xl bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                        >
+                            {/* Modal Header */}
+                            <div className="px-6 py-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg bg-black/50 border border-white/5 ${selectedAgent.status === 'retired' ? 'text-red-400' : 'text-green-400'}`}>
+                                        {(() => {
+                                            const AgentIcon = pickPersonaIcon(personaLabel(selectedAgent), selectedAgent.specialization);
+                                            return <AgentIcon className="w-5 h-5" />;
+                                        })()}
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-white">{personaLabel(selectedAgent)}</h3>
+                                        <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.2em]">Team Directive — {selectedAgent.id.slice(0, 8)}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedAgent(null)}
+                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-white/30 hover:text-white"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            {/* Modal Content */}
+                            <div className="p-6 space-y-8 overflow-y-auto max-h-[70vh]">
+                                {/* Role Section */}
+                                <div>
+                                    <h4 className="text-[10px] font-mono text-white/20 uppercase tracking-[0.3em] mb-3 flex items-center gap-2">
+                                        <Shield className="w-3 h-3" /> Mission Brief
+                                    </h4>
+                                    <p className="text-sm font-medium text-white/90 leading-relaxed italic">
+                                        "{parseMission(selectedAgent.task).summary}"
+                                    </p>
+                                    <p className="text-xs text-white/50 mt-2 leading-relaxed">
+                                        Specialty: {selectedAgent.specialization || 'Adaptive market operations'}.
+                                        {` `}
+                                        Deliverable: {parseMission(selectedAgent.task).deliverable || 'Not specified'}.
+                                    </p>
+                                    <p className="text-xs text-white/50 mt-2 leading-relaxed">
+                                        Success metric: {parseMission(selectedAgent.task).success || 'Not specified'}.
+                                        {` `}
+                                        Handoff: {parseMission(selectedAgent.task).handoff || 'Orchestrator'}.
+                                    </p>
+                                </div>
+
+                                {/* Status Dashboard */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                                        <div className="text-[10px] text-white/20 uppercase font-mono mb-1">Affinity</div>
+                                        <div className="text-sm font-bold text-indigo-300">{selectedAgent.regime_affinity.toUpperCase()}</div>
+                                    </div>
+                                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                                        <div className="text-[10px] text-white/20 uppercase font-mono mb-1">Lifespan Status</div>
+                                        {selectedAgent.status === 'retired' ? (
+                                            <div className="text-sm font-bold text-red-400 flex items-center gap-2">
+                                                <Skull className="w-3 h-3" /> DECOMMISSIONED
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm font-bold text-green-400 flex items-center gap-2 animate-pulse">
+                                                <Activity className="w-3 h-3" /> MISSION ACTIVE
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Why Terminated/Extended */}
+                                <div>
+                                    <h4 className="text-[10px] font-mono text-white/20 uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                                        <Clock className="w-3 h-3" /> Lifecycle Log
+                                    </h4>
+                                    <div className="space-y-3">
+                                        <div className="flex gap-4 p-3 rounded-lg bg-black/40 border border-white/5">
+                                            <div className="w-2 h-2 rounded-full bg-green-500 mt-1" />
+                                            <div>
+                                                <div className="text-[10px] font-mono text-white/30">{new Date(selectedAgent.spawn_time).toLocaleString()}</div>
+                                                <div className="text-xs text-white/80 mt-1">Initialization: Joined team for {selectedAgent.regime_affinity} with mission handoff to {parseMission(selectedAgent.task).handoff || 'Orchestrator'}.</div>
+                                            </div>
+                                        </div>
+                                        {selectedAgent.status === 'retired' ? (
+                                            <div className="flex gap-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                                                <div className="w-2 h-2 rounded-full bg-red-500 mt-1" />
+                                                <div>
+                                                    <div className="text-[10px] font-mono text-red-300/50">{new Date(selectedAgent.death_time!).toLocaleString()}</div>
+                                                    <div className="text-xs text-red-200 mt-1">Termination: {selectedAgent.death_reason || 'End of deployment cycle.'}</div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                                                <div className="w-2 h-2 rounded-full bg-green-500 mt-1 animate-pulse" />
+                                                <div>
+                                                    <div className="text-[10px] font-mono text-green-300/50">STABLE EXTENSION</div>
+                                                    <div className="text-xs text-green-200 mt-1">Status: Verified. Mission extended due to continued regime resonance (Confidence &gt; 0.70).</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Mission Work (Logs) */}
+                                <div>
+                                    <h4 className="text-[10px] font-mono text-white/20 uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                                        <Globe className="w-3 h-3" /> Real-time Mission Stream
+                                    </h4>
+                                    <div className="space-y-2 bg-black/60 rounded-xl p-4 border border-white/5 font-mono text-[10px] leading-relaxed">
+                                        {fetchingLogs ? (
+                                            <div className="text-white/20 italic animate-pulse">Syncing neural stream...</div>
+                                        ) : selectedAgentLogs.length === 0 ? (
+                                            <div className="text-white/20 italic">No specific mission logs recorded in this cycle.</div>
+                                        ) : (
+                                            selectedAgentLogs.map((log, i) => (
+                                                <div key={i} className="flex gap-3 mb-2 opacity-80 hover:opacity-100 transition-opacity">
+                                                    <span className="text-purple-400">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                                                    <span className="text-white/70">{log.message}</span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-white/[0.02] border-t border-white/5 text-[9px] font-mono text-white/20 text-center uppercase tracking-widest">
+                                Secure Communication Linked — Orbital Node Ace-01
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </section>
-    );
-}
-
-function ResumeRow({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/25 px-3 py-2">
-            <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-white/45">{label}</span>
-            <span className="max-w-[58%] truncate text-right text-xs font-semibold text-white/85">{value}</span>
-        </div>
-    );
-}
-
-function ResumeBlock({ icon: Icon, title, body }: { icon: any; title: string; body: string }) {
-    return (
-        <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-            <div className="mb-1 flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.18em] text-white/45">
-                <Icon className="h-3.5 w-3.5 text-cyan-200/80" />
-                {title}
-            </div>
-            <p className="text-xs leading-relaxed text-white/75">{body}</p>
-        </div>
     );
 }
