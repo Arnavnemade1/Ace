@@ -1,48 +1,44 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Activity, BrainCircuit, Radio } from "lucide-react";
 import { motion } from "framer-motion";
 
 const Navigation = () => {
     const location = useLocation();
 
     const links = [
-        { name: "Terminal", path: "/", icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
-        { name: "Arena", path: "/arena", icon: <BrainCircuit className="w-3.5 h-3.5" /> },
-        { name: "Oracle", path: "/oracle", icon: <Radio className="w-3.5 h-3.5" /> },
-        { name: "Analytics", path: "/analytics", icon: <Activity className="w-3.5 h-3.5" /> },
+        { name: "Terminal", path: "/" },
+        { name: "Arena", path: "/arena" },
+        { name: "Oracle", path: "/oracle" },
+        { name: "Analytics", path: "/analytics" },
     ];
 
     return (
-        <nav className="fixed top-8 left-0 right-0 z-50 flex justify-center pointer-events-none px-6">
+        <nav className="fixed top-6 left-0 right-0 z-50 flex justify-center pointer-events-none px-6">
             <motion.div
                 initial={{ y: -20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                className="pointer-events-auto h-12 bg-black/40 backdrop-blur-2xl border border-white/5 rounded-full px-2 flex items-center gap-1 shadow-2xl"
+                className="pointer-events-auto flex items-center gap-4 border border-white/10 bg-[#0f1110]/80 px-3 py-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
             >
-                <Link to="/" className="flex items-center gap-3 px-4 mr-2 group">
-                    <span className="font-['Dancing_Script'] font-bold text-2xl tracking-normal text-white group-hover:scale-105 transition-transform">Ace</span>
+                <Link to="/" className="px-3 py-2 group">
+                    <span className="font-display text-xl tracking-tight text-white transition-opacity group-hover:opacity-80">Ace</span>
                 </Link>
 
-                <div className="h-4 w-px bg-white/10 mx-1" />
+                <div className="h-6 w-px bg-white/10" />
 
                 <div className="flex items-center gap-1">
                     {links.map((link) => (
                         <Link
                             key={link.path}
                             to={link.path}
-                            className={`relative px-4 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all ${location.pathname === link.path
+                            className={`relative px-4 py-2 text-[11px] uppercase tracking-[0.24em] transition-all ${location.pathname === link.path
                                 ? "text-white"
                                 : "text-white/40 hover:text-white/80"
                                 }`}
                         >
-                            <div className="flex items-center gap-2 z-10 relative">
-                                {link.icon}
-                                <span className="hidden sm:inline">{link.name}</span>
-                            </div>
+                            <div className="relative z-10">{link.name}</div>
                             {location.pathname === link.path && (
                                 <motion.div
                                     layoutId="navbar-pill"
-                                    className="absolute inset-0 bg-white/10 rounded-full -z-0"
+                                    className="absolute inset-0 border border-white/10 bg-white/6 -z-0"
                                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                                 />
                             )}

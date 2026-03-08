@@ -216,28 +216,32 @@ const AgentArena = () => {
     ];
 
     return (
-        <div className="min-h-screen bg-background overflow-x-hidden pt-24 pb-12">
-            <div className="container mx-auto px-6">
+        <div className="min-h-screen overflow-x-hidden bg-[#101312] pt-32 pb-12 text-[#f4efe6]">
+            <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(206,172,114,0.1),transparent_26%),radial-gradient(circle_at_82%_18%,rgba(107,138,177,0.14),transparent_24%),linear-gradient(180deg,#101312_0%,#0b0d0d_100%)]" />
+            <div className="relative z-10 mx-auto max-w-[92rem] px-6">
                 <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-12 cursor-default">
-                    <h1 className="text-4xl md:text-5xl font-display font-bold tracking-tight mb-4 flex items-center gap-4">
-                        <Cpu className="text-primary w-12 h-12" /> Agent Arena
+                    <div className="border-t border-white/10 pt-6">
+                    <div className="text-[11px] uppercase tracking-[0.32em] text-white/34 mb-4">Arena</div>
+                    <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4 flex items-center gap-4">
+                        <Cpu className="text-[#d8c3a5] w-12 h-12" /> Agent Arena
                     </h1>
-                    <p className="text-muted-foreground text-lg">Live multi-agent neural monitoring & API feed processing.</p>
+                    <p className="text-white/58 text-lg max-w-3xl leading-8">Live monitoring for portfolio state, execution readiness, open orders, and the swarm’s internal decision stream.</p>
+                    </div>
                 </motion.div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-                    <div className="glass-card p-6 flex flex-col justify-center items-center text-center col-span-1 border-primary/20 bg-primary/5">
-                        <Database className="w-8 h-8 text-primary mb-3 opacity-80" />
-                        <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-1">Live Portfolio Value</p>
+                    <div className="border border-white/8 bg-black/10 p-6 flex flex-col justify-center items-center text-center col-span-1">
+                        <Database className="w-8 h-8 text-[#d8c3a5] mb-3 opacity-80" />
+                        <p className="text-xs text-white/40 uppercase tracking-[0.24em] mb-1">Live Portfolio Value</p>
                         <h2 className="text-4xl font-display font-bold profit-text glow-text">
                             ${account ? formatMoney(account.equity ?? account.total_value ?? account.portfolio_value ?? account.cash ?? 0, 2) : '---'}
                         </h2>
-                        <div className="mt-3 flex gap-4 text-sm opacity-80">
-                            <div><span className="text-muted-foreground mr-1">Cash:</span> ${account ? formatMoney(account.cash ?? 0, 2) : '---'}</div>
-                            <div><span className="text-muted-foreground mr-1">BP:</span> ${account ? formatMoney(account.buying_power ?? 0, 2) : '---'}</div>
-                            <div><span className="text-muted-foreground mr-1">Equity:</span> ${account ? formatMoney(account.equity ?? 0, 2) : '---'}</div>
+                        <div className="mt-3 flex gap-4 text-sm opacity-80 text-white/70">
+                            <div><span className="text-white/35 mr-1">Cash:</span> ${account ? formatMoney(account.cash ?? 0, 2) : '---'}</div>
+                            <div><span className="text-white/35 mr-1">BP:</span> ${account ? formatMoney(account.buying_power ?? 0, 2) : '---'}</div>
+                            <div><span className="text-white/35 mr-1">Equity:</span> ${account ? formatMoney(account.equity ?? 0, 2) : '---'}</div>
                         </div>
-                        <div className="mt-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <div className="mt-3 text-[10px] uppercase tracking-[0.22em] text-white/35">
                             {marketClock ? (
                                 <span className="inline-flex items-center gap-2">
                                     <Clock className="w-3 h-3" />
@@ -248,48 +252,48 @@ const AgentArena = () => {
                         </div>
                     </div>
 
-                    <div className="glass-card p-6 flex flex-col justify-center items-center text-center col-span-1 border-primary/10">
-                        <Terminal className="w-6 h-6 text-primary/60 mb-2" />
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-tighter font-semibold mb-1">Neural Load</p>
+                    <div className="border border-white/8 bg-black/10 p-6 flex flex-col justify-center items-center text-center col-span-1">
+                        <Terminal className="w-6 h-6 text-[#9bb8d3] mb-2" />
+                        <p className="text-[10px] text-white/35 uppercase tracking-[0.22em] mb-1">Neural Load</p>
                         <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
                             <motion.div
                                 animate={{ width: `${neuralLoad}%` }}
                                 transition={{ type: "spring", stiffness: 100, damping: 20 }}
-                                className="h-full bg-primary shadow-[0_0_8px_rgba(56,189,248,0.5)]"
+                                className="h-full bg-[#d8c3a5] shadow-[0_0_8px_rgba(216,195,165,0.45)]"
                             />
                         </div>
-                        <p className="mt-2 text-xs font-mono text-primary/80 tracking-widest animate-pulse truncate w-full px-2">
+                        <p className="mt-2 text-xs font-mono text-[#d8c3a5] tracking-[0.18em] animate-pulse truncate w-full px-2">
                             {currentAction}
                         </p>
                     </div>
 
-                    <div className="glass-card p-6 col-span-1 lg:col-span-2 flex flex-col relative overflow-hidden bg-white/[0.02]">
+                    <div className="border border-white/8 bg-black/10 p-6 col-span-1 lg:col-span-2 flex flex-col relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-4 opacity-10"><Wifi className="w-32 h-32" /></div>
                         <div className="flex items-center gap-3 mb-4 z-10">
-                            <Activity className="text-primary w-5 h-5" />
+                            <Activity className="text-[#9bb8d3] w-5 h-5" />
                             <h3 className="font-display font-semibold text-lg">Alpaca Sync Status</h3>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 z-10">
-                            <div className="rounded-lg border border-border/50 bg-black/30 p-4">
-                                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Sync State</p>
+                            <div className="border border-white/8 bg-black/30 p-4">
+                                <p className="text-xs uppercase tracking-[0.22em] text-white/35 mb-2">Sync State</p>
                                 <div className="flex items-center gap-2">
                                     <span className={`text-xs font-mono px-2 py-1 rounded border ${syncStatus.status === 'error' ? 'border-red-500/40 text-red-300 bg-red-500/10' : syncStatus.status === 'syncing' ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'}`}>
                                         {syncStatus.status === 'error' ? 'ERROR' : syncStatus.status === 'syncing' ? 'SYNCING' : 'LIVE'}
                                     </span>
-                                    <span className="text-xs text-muted-foreground">
+                                    <span className="text-xs text-white/40">
                                         {syncStatus.lastSynced ? `Last synced ${syncStatus.lastSynced.toLocaleTimeString()}` : 'Awaiting first sync'}
                                     </span>
                                 </div>
                                 {syncStatus.error && <p className="mt-2 text-xs text-red-300">{syncStatus.error}</p>}
                             </div>
-                            <div className="rounded-lg border border-border/50 bg-black/30 p-4">
-                                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Portfolio Overview</p>
+                            <div className="border border-white/8 bg-black/30 p-4">
+                                <p className="text-xs uppercase tracking-[0.22em] text-white/35 mb-2">Portfolio Overview</p>
                                 <div className="flex items-center justify-between text-sm">
-                                    <span className="text-muted-foreground">Positions</span>
-                                    <span className="font-mono text-primary">{positions.length}</span>
+                                    <span className="text-white/40">Positions</span>
+                                    <span className="font-mono text-[#d8c3a5]">{positions.length}</span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm mt-2">
-                                    <span className="text-muted-foreground">Orders</span>
+                                    <span className="text-white/40">Orders</span>
                                     <span className="font-mono text-amber-400">{orders.length}</span>
                                 </div>
                             </div>
@@ -298,37 +302,37 @@ const AgentArena = () => {
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 mb-10">
-                    <div className="glass-card p-6 overflow-hidden border border-primary/10">
+                    <div className="border border-white/8 bg-black/10 p-6 overflow-hidden">
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                             <div className="flex items-center gap-3">
-                                <BarChart3 className="text-primary w-5 h-5" />
-                                <h3 className="font-display font-semibold text-foreground tracking-wide">Top Positions</h3>
+                                <BarChart3 className="text-[#9bb8d3] w-5 h-5" />
+                                <h3 className="font-display font-semibold tracking-wide">Top Positions</h3>
                             </div>
-                            <div className="flex flex-wrap items-center gap-3 text-xs">
-                                <label className="flex items-center gap-2 text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-white/40">
+                                <label className="flex items-center gap-2">
                                     Asset Class
-                                    <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={assetClassFilter} onChange={(e) => setAssetClassFilter(e.target.value)}>
+                                    <select className="bg-black/30 border border-white/10 px-2 py-1 text-white" value={assetClassFilter} onChange={(e) => setAssetClassFilter(e.target.value)}>
                                         {assetClassOptions.map((opt: string) => (
                                             <option key={opt} value={opt}>{opt === "All" ? "All" : formatAssetClass(opt)}</option>
                                         ))}
                                     </select>
                                 </label>
-                                <label className="flex items-center gap-2 text-muted-foreground">
+                                <label className="flex items-center gap-2">
                                     Side
-                                    <select className="bg-black/30 border border-border/60 rounded px-2 py-1" value={sideFilter} onChange={(e) => setSideFilter(e.target.value)}>
+                                    <select className="bg-black/30 border border-white/10 px-2 py-1 text-white" value={sideFilter} onChange={(e) => setSideFilter(e.target.value)}>
                                         {sideOptions.map((opt: string) => (
                                             <option key={opt} value={opt}>{opt === "All" ? "All" : opt.toUpperCase()}</option>
                                         ))}
                                     </select>
                                 </label>
-                                <button className="text-primary/80 hover:text-primary transition-colors text-xs font-mono" onClick={() => setShowAllPositions(v => !v)}>
+                                <button className="text-[#d8c3a5] hover:text-white transition-colors text-xs font-mono" onClick={() => setShowAllPositions(v => !v)}>
                                     {showAllPositions ? "Collapse" : "View All"}
                                 </button>
                             </div>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-muted-foreground uppercase border-b border-border/50">
+                            <table className="w-full text-sm text-left text-white/82">
+                                <thead className="text-xs text-white/34 uppercase border-b border-white/8">
                                     <tr>
                                         <th className="px-4 py-2 font-medium">Asset</th>
                                         <th className="px-4 py-2 font-medium">Price</th>
@@ -337,7 +341,7 @@ const AgentArena = () => {
                                         <th className="px-4 py-2 font-medium text-right">Total P/L ($)</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-border/20">
+                                <tbody className="divide-y divide-white/6">
                                     {displayPositions.map((pos: any, idx: number) => {
                                         const currentPrice = toNum(pos.current_price || pos.lastday_price || pos.avg_entry_price);
                                         const qty = toNum(pos.qty);
@@ -349,13 +353,13 @@ const AgentArena = () => {
                                                 initial={{ opacity: 0 }}
                                                 animate={{ opacity: 1 }}
                                                 transition={{ delay: idx * 0.03 }}
-                                                className="hover:bg-primary/10 transition-colors cursor-pointer group"
+                                                className="hover:bg-white/5 transition-colors cursor-pointer group"
                                                 onClick={() => setSelectedSymbol(pos.symbol)}
                                             >
-                                                <td className="px-4 py-3 font-semibold font-display text-foreground flex items-center gap-2">
+                                                <td className="px-4 py-3 font-semibold font-display text-white flex items-center gap-2">
                                                     {pos.symbol}
                                                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <Activity className="w-3 h-3 text-primary animate-pulse" />
+                                                        <Activity className="w-3 h-3 text-[#d8c3a5] animate-pulse" />
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3">${formatMoney(currentPrice, 2)}</td>
@@ -369,7 +373,7 @@ const AgentArena = () => {
                                     })}
                                     {displayPositions.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                                            <td colSpan={5} className="px-4 py-12 text-center text-white/40">
                                                 No open positions. Place some trades to see this table populate.
                                             </td>
                                         </tr>
@@ -379,24 +383,24 @@ const AgentArena = () => {
                         </div>
                     </div>
 
-                    <div className="glass-card p-6 overflow-hidden border border-primary/10">
+                    <div className="border border-white/8 bg-black/10 p-6 overflow-hidden">
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                             <div className="flex items-center gap-3">
-                                <Terminal className="text-primary w-5 h-5" />
-                                <h3 className="font-display font-semibold text-foreground tracking-wide">Recent Orders</h3>
+                                <Terminal className="text-[#d8c3a5] w-5 h-5" />
+                                <h3 className="font-display font-semibold tracking-wide">Recent Orders</h3>
                             </div>
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                <span className="px-2 py-1 rounded border border-border/60 bg-black/30">Cancel 0 selected</span>
+                            <div className="flex items-center gap-4 text-xs text-white/40">
+                                <span className="px-2 py-1 border border-white/10 bg-black/30">Cancel 0 selected</span>
                                 <span>0 rows selected</span>
-                                <span className="text-primary/80 hover:text-primary transition-colors cursor-pointer">Clear Selection</span>
-                                <button className="text-primary/80 hover:text-primary transition-colors text-xs font-mono" onClick={() => setShowAllOrders(v => !v)}>
+                                <span className="text-[#d8c3a5] hover:text-white transition-colors cursor-pointer">Clear Selection</span>
+                                <button className="text-[#d8c3a5] hover:text-white transition-colors text-xs font-mono" onClick={() => setShowAllOrders(v => !v)}>
                                     {showAllOrders ? "Collapse" : "View All"}
                                 </button>
                             </div>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-muted-foreground uppercase border-b border-border/50">
+                            <table className="w-full text-sm text-left text-white/82">
+                                <thead className="text-xs text-white/34 uppercase border-b border-white/8">
                                     <tr>
                                         <th className="px-4 py-2 font-medium">Asset</th>
                                         <th className="px-4 py-2 font-medium">Order Type</th>
@@ -411,10 +415,10 @@ const AgentArena = () => {
                                         <th className="px-4 py-2 font-medium">Expires At</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-border/20">
+                                <tbody className="divide-y divide-white/6">
                                     {displayOrders.map((ord: any, idx: number) => (
-                                        <motion.tr key={`${ord.id || ord.symbol}-${idx}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.02 }} className="hover:bg-secondary/30 transition-colors">
-                                            <td className="px-4 py-3 font-semibold font-display text-foreground">{ord.symbol}</td>
+                                        <motion.tr key={`${ord.id || ord.symbol}-${idx}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.02 }} className="hover:bg-white/5 transition-colors">
+                                            <td className="px-4 py-3 font-semibold font-display text-white">{ord.symbol}</td>
                                             <td className="px-4 py-3">{(ord.order_type || ord.type || '—').toUpperCase()}</td>
                                             <td className="px-4 py-3">{(ord.side || '—').toUpperCase()}</td>
                                             <td className="px-4 py-3">{ord.qty ?? '—'}</td>
@@ -433,7 +437,7 @@ const AgentArena = () => {
                                     ))}
                                     {displayOrders.length === 0 && (
                                         <tr>
-                                            <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                                            <td colSpan={11} className="px-4 py-12 text-center text-white/40">
                                                 No orders. Place a trade via the dashboard or the API to see this table populate.
                                             </td>
                                         </tr>
@@ -444,27 +448,27 @@ const AgentArena = () => {
                     </div>
                 </div>
 
-                <div className="glass-card p-6 mb-8 border border-primary/10 bg-black/30">
+                <div className="border border-white/8 bg-black/10 p-6 mb-8">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                         <div className="flex items-center gap-3">
-                            <Eye className="text-primary w-5 h-5" />
-                            <h3 className="font-display font-semibold text-foreground tracking-wide">Strategic Notes</h3>
+                            <Eye className="text-[#9bb8d3] w-5 h-5" />
+                            <h3 className="font-display font-semibold tracking-wide">Strategic Notes</h3>
                         </div>
-                        <div className="text-xs text-muted-foreground font-mono">{marketLine}</div>
+                        <div className="text-xs text-white/40 font-mono">{marketLine}</div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-white/74">
                         <div className="space-y-3">
                             <div>
-                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                                <div className="text-xs uppercase tracking-[0.22em] text-white/34 mb-1">
                                     {isInvesting ? "Investing In" : "Not Actively Investing"}
                                 </div>
-                                <div className="text-foreground/90">
+                                <div>
                                     {isInvesting ? investingSummary : `Watching: ${watchingSummary}`}
                                 </div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Why</div>
-                                <div className="text-foreground/90">
+                                <div className="text-xs uppercase tracking-[0.22em] text-white/34 mb-1">Why</div>
+                                <div>
                                     {recentDecision?.reasoning
                                         ? recentDecision.reasoning
                                         : isInvesting
@@ -473,16 +477,16 @@ const AgentArena = () => {
                                 </div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Thought Process</div>
-                                <div className="text-foreground/90 whitespace-pre-line">
+                                <div className="text-xs uppercase tracking-[0.22em] text-white/34 mb-1">Thought Process</div>
+                                <div className="whitespace-pre-line">
                                     {recentThought?.reasoning
                                         ? recentThought.reasoning.split(" | ").join("\n")
                                         : "Prioritize high-conviction entries, avoid overtrading, and preserve capital during low-signal regimes."}
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Profit Roadmap</div>
+                            <div>
+                                <div className="text-xs uppercase tracking-[0.22em] text-white/34 mb-2">Profit Roadmap</div>
                             <div className="space-y-2">
                                 {roadmapLines.map((line) => (
                                     <div key={line} className="text-foreground/90">• {line}</div>
@@ -494,13 +498,13 @@ const AgentArena = () => {
 
                 {/* Live Internal Monologue Matrix */}
                 <div className="glass-card p-0 overflow-hidden border border-primary/10">
-                    <div className="px-6 py-4 border-b border-border/30 flex items-center justify-between bg-black/40">
+                    <div className="px-6 py-4 border-b border-white/8 flex items-center justify-between bg-black/40">
                         <div className="flex items-center gap-3">
-                            <Terminal className="text-primary w-5 h-5" />
-                            <h3 className="font-display font-semibold text-foreground tracking-wide">Swarm Internal Monologue Stream</h3>
+                            <Terminal className="text-[#d8c3a5] w-5 h-5" />
+                            <h3 className="font-display font-semibold tracking-wide">Swarm Internal Monologue Stream</h3>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-primary font-mono animate-pulse">
-                            <div className="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
+                        <div className="flex items-center gap-2 text-xs text-[#d8c3a5] font-mono animate-pulse">
+                            <div className="w-2 h-2 rounded-full bg-[#93d24a] shadow-[0_0_8px_rgba(147,210,74,0.8)]" />
                             STREAM_ACTIVE
                         </div>
                     </div>
