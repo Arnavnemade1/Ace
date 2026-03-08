@@ -138,6 +138,12 @@ function normalizeMindset(raw: unknown): OperatorMindset {
   return raw === "defensive" || raw === "aggressive" ? raw : "balanced";
 }
 
+function spark(value: number, max = 1, width = 14): string {
+  const clamped = Math.max(0, Math.min(value, max));
+  const filled = Math.round((clamped / max) * width);
+  return `${"█".repeat(filled)}${"░".repeat(Math.max(0, width - filled))}`;
+}
+
 function isMarketOpen(): boolean {
   const nowNY = new Date(new Date().toLocaleString("en-US", { timeZone: NY_TZ }));
   const day = nowNY.getDay();
@@ -171,6 +177,22 @@ async function fetchSnapshots(symbols: string[], key: string, secret: string) {
     } catch { }
   }
   return all;
+}
+
+function asNum(value: unknown, fallback = 0): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function isoAgeMinutes(iso?: string | null): number | null {
+  if (!iso) return null;
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, Math.round((Date.now() - ts) / 60000));
+}
+
+function dedupeStrings(items: string[]) {
+  return [...new Set(items.filter(Boolean))];
 }
 
 serve(async (req) => {
@@ -342,18 +364,137 @@ serve(async (req) => {
       ? posArr.map((p: any) => `${p.symbol}: ${p.qty} shares @ $${parseFloat(p.avg_entry_price).toFixed(2)} → $${parseFloat(p.current_price).toFixed(2)} (P&L: $${parseFloat(p.unrealized_pl).toFixed(2)}, ${(parseFloat(p.unrealized_plpc) * 100).toFixed(1)}%)`).join("\n")
       : "EMPTY — need to build positions";
 
-    // Fetch news
-    const NEWSDATA_KEY = GET_SECRET("NEWSDATA_KEY");
-    let headlines: string[] = [];
-    try {
-      if (NEWSDATA_KEY) {
-        const newsRes = await fetch(`https://newsdata.io/api/1/latest?apikey=${NEWSDATA_KEY}&q=stock market finance&language=en`);
-        if (newsRes.ok) {
-          const nd = await newsRes.json();
-          headlines = (nd.results || []).slice(0, 10).map((n: any) => n.title);
+    const focusSymbols = dedupeStrings([
+      ...topMovers.slice(0, 15).map((m: any) => m.sym),
+      ...heldSymbols,
+      "SPY", "QQQ", "IWM", "DIA", "XLE", "XLF", "XLK", "SMH", "TLT", "GLD", "USO", "BTCUSD"
+    ]).slice(0, 30);
+
+    const quotesSince = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+    const newsSince = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+    const [{ data: recentQuotes }, { data: recentNews }, { data: rawNewsRows }, { data: priorContexts }] = await Promise.all([
+      supabase
+        .from("market_quotes")
+        .select("symbol, source, price, prev_close, change_percent, volume, as_of")
+        .in("symbol", focusSymbols)
+        .gte("as_of", quotesSince)
+        .order("as_of", { ascending: false })
+        .limit(250),
+      supabase
+        .from("news_articles")
+        .select("source, title, summary, published_at, url, symbols, sentiment_hint, keywords")
+        .gte("published_at", newsSince)
+        .order("published_at", { ascending: false })
+        .limit(120),
+      supabase
+        .from("live_api_streams")
+        .select("source, payload, created_at")
+        .in("source", ["NewsAPI", "NewsData.io"])
+        .gte("created_at", newsSince)
+        .order("created_at", { ascending: false })
+        .limit(25),
+      supabase
+        .from("ai_context_snapshots")
+        .select("summary, created_at")
+        .eq("agent_name", "Swarm Orchestrator")
+        .eq("scope", "pre_trade_context")
+        .order("created_at", { ascending: false })
+        .limit(3),
+    ]);
+
+    const latestQuoteBySymbol = new Map<string, any>();
+    for (const row of recentQuotes || []) {
+      if (!latestQuoteBySymbol.has(row.symbol)) latestQuoteBySymbol.set(row.symbol, row);
+    }
+
+    const macroTape = focusSymbols
+      .filter((sym) => ["SPY", "QQQ", "IWM", "DIA", "XLE", "XLF", "XLK", "SMH", "TLT", "GLD", "USO", "BTCUSD"].includes(sym))
+      .map((sym) => {
+        const quote = latestQuoteBySymbol.get(sym);
+        if (!quote?.price) return null;
+        const age = isoAgeMinutes(quote.as_of);
+        return `${sym}: $${asNum(quote.price).toFixed(2)} (${asNum(quote.change_percent).toFixed(2)}%)${age !== null ? `, age ${age}m` : ""}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    const fallbackNews = (rawNewsRows || []).flatMap((row: any) => {
+      if (!Array.isArray(row.payload)) return [];
+      return row.payload.slice(0, 10).map((article: any) => ({
+        source: row.source,
+        title: article?.title || article?.headline || "",
+        summary: article?.description || article?.summary || null,
+        published_at: article?.publishedAt || article?.pubDate || row.created_at,
+        url: article?.url || article?.link || null,
+        symbols: Array.isArray(article?.symbols) ? article.symbols : [],
+        sentiment_hint: null,
+        keywords: Array.isArray(article?.keywords) ? article.keywords : [],
+      }));
+    });
+
+    const recentNewsPool = (recentNews && recentNews.length > 0) ? recentNews : fallbackNews;
+
+    const relevantNews = (recentNewsPool || [])
+      .filter((article: any) => {
+        const symbols = Array.isArray(article.symbols) ? article.symbols.map((s: any) => String(s).toUpperCase()) : [];
+        const keywords = Array.isArray(article.keywords) ? article.keywords.map((s: any) => String(s).toUpperCase()) : [];
+        return symbols.some((sym: string) => focusSymbols.includes(sym)) || keywords.some((kw: string) => focusSymbols.includes(kw));
+      })
+      .slice(0, 18);
+
+    const selectedNews = relevantNews.length > 0 ? relevantNews : (recentNewsPool || []).slice(0, 12);
+
+    let headlines = selectedNews.map((article: any) => {
+      const age = isoAgeMinutes(article.published_at);
+      const syms = Array.isArray(article.symbols) && article.symbols.length > 0 ? ` [${article.symbols.slice(0, 4).join(", ")}]` : "";
+      const sentiment = Number.isFinite(Number(article.sentiment_hint)) ? ` | score ${Number(article.sentiment_hint).toFixed(2)}` : "";
+      return `• ${article.title}${syms}${age !== null ? ` | ${age}m ago` : ""}${sentiment}`;
+    });
+
+    if (headlines.length === 0) {
+      const NEWSDATA_KEY = GET_SECRET("NEWSDATA_KEY");
+      try {
+        if (NEWSDATA_KEY) {
+          const newsRes = await fetch(`https://newsdata.io/api/1/latest?apikey=${NEWSDATA_KEY}&q=stock market finance&language=en`);
+          if (newsRes.ok) {
+            const nd = await newsRes.json();
+            headlines = (nd.results || []).slice(0, 10).map((n: any) => `• ${n.title}`);
+          }
         }
-      }
-    } catch { }
+      } catch { }
+    }
+
+    const symbolCatalysts = focusSymbols
+      .slice(0, 12)
+      .map((sym) => {
+        const quote = latestQuoteBySymbol.get(sym);
+        const related = selectedNews.filter((article: any) => {
+          const symbols = Array.isArray(article.symbols) ? article.symbols.map((s: any) => String(s).toUpperCase()) : [];
+          const keywords = Array.isArray(article.keywords) ? article.keywords.map((s: any) => String(s).toUpperCase()) : [];
+          return symbols.includes(sym) || keywords.includes(sym);
+        }).slice(0, 2);
+        if (!quote && related.length === 0) return null;
+        const priceLine = quote?.price ? `$${asNum(quote.price).toFixed(2)} (${asNum(quote.change_percent).toFixed(2)}%)` : "no fresh quote";
+        const catalysts = related.length > 0 ? related.map((article: any) => article.title).join(" || ") : "no linked article";
+        return `${sym}: ${priceLine} | ${catalysts}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    const freshnessSummary = [
+      `quotes=${recentQuotes?.length || 0}`,
+      `news=${recentNewsPool?.length || 0}`,
+      `latest_news_age=${relevantNews[0]?.published_at ? `${isoAgeMinutes(relevantNews[0].published_at)}m` : "unknown"}`,
+      `latest_quote_age=${latestQuoteBySymbol.get("SPY")?.as_of ? `${isoAgeMinutes(latestQuoteBySymbol.get("SPY").as_of)}m` : "unknown"}`
+    ].join(" | ");
+
+    const priorContextSummary = (priorContexts || [])
+      .map((row: any) => {
+        const summary = row.summary || {};
+        return `${row.created_at}: thesis=${summary.thesis || "n/a"} | outlook=${summary.market_outlook || "n/a"}`;
+      })
+      .join("\n") || "None";
 
     const brainPrompt = {
       model: "google/gemini-3-flash-preview",
@@ -386,6 +527,12 @@ GEOPOLITICAL CATALYSTS: You MUST trade based on major world events.
    ${winSummary}
    Avoid repeating recent losing patterns. Cut losers down >5%, trim winners up >8%.
 
+5. DATA DISCIPLINE:
+   - Treat the provided timestamps as ground truth. If context is stale, say so explicitly.
+   - Prefer symbol-specific catalysts over generic macro talk.
+   - If a thesis depends on news, reference the symbol, article recency, and the observed market reaction.
+   - Do not invent catalysts that are absent from the supplied context.
+
 ═══ DECISION FORMAT ═══
 Return valid JSON ONLY (no markdown blocks inside the JSON):
 {
@@ -409,11 +556,23 @@ Daily P&L: $${dailyPnl.toFixed(2)} (${dailyPnlPct.toFixed(2)}%)
 Positions (${posArr.length}/${maxOpenPositions}):
 ${positionsSummary}
 
+═══ MACRO TAPE ═══
+${macroTape || "No fresh macro tape available"}
+
 ═══ MARKET SCAN (${topMovers.length} top movers) ═══
 ${marketContext}
 
-═══ NEWS HEADLINES ═══
-${headlines.length > 0 ? headlines.map(h => `• ${h}`).join("\n") : "None"}
+═══ SYMBOL CATALYST GRID ═══
+${symbolCatalysts || "No symbol-linked catalysts available"}
+
+═══ NEWS HEADLINES (48H) ═══
+${headlines.length > 0 ? headlines.join("\n") : "None"}
+
+═══ CONTEXT FRESHNESS ═══
+${freshnessSummary}
+
+═══ PRIOR AI CONTEXT ═══
+${priorContextSummary}
 
 Execute strategy.`
         }
@@ -433,6 +592,22 @@ Execute strategy.`
     }
 
     const trades = Array.isArray(brain.trades) ? brain.trades : (brain.action ? [brain] : []);
+
+    await supabase.from("ai_context_snapshots").insert({
+      agent_name: "Swarm Orchestrator",
+      scope: "pre_trade_context",
+      summary: {
+        operator_mindset: operatorMindset,
+        market_open: marketOpen,
+        focus_symbols: focusSymbols,
+        macro_tape: macroTape,
+        top_headlines: headlines.slice(0, 8),
+        freshness: freshnessSummary,
+        market_outlook: brain.market_outlook || null,
+        thesis: brain.thesis || null,
+        trade_count: trades.length,
+      },
+    });
 
     // ═══════════════════════════════════════════════════
     // 6. EXECUTE TRADES (up to 3 per cycle)
@@ -614,11 +789,48 @@ Execute strategy.`
       const executed = executionResults.filter(r => r.status === "EXECUTED");
       const skipped = executionResults.filter(r => r.status === "SKIPPED");
       const failed = executionResults.filter(r => r.status === "FAILED");
+      const buySignals = trades.filter((t: any) => t.action === "BUY").length;
+      const sellSignals = trades.filter((t: any) => t.action === "SELL").length;
+      const avgConviction = trades.length > 0
+        ? trades.reduce((sum: number, t: any) => sum + (Number(t.conviction) || 0), 0) / trades.length
+        : 0;
+
+      const { data: coreAgentStates } = await supabase
+        .from("agent_state")
+        .select("status");
+      const coreCounts = { active: 0, idle: 0, learning: 0, error: 0 };
+      for (const row of (coreAgentStates || [])) {
+        const status = String((row as any).status || "").toLowerCase();
+        if (status === "active") coreCounts.active++;
+        else if (status === "learning") coreCounts.learning++;
+        else if (status === "error") coreCounts.error++;
+        else coreCounts.idle++;
+      }
+      const coreTotal = (coreAgentStates || []).length;
+
+      let oracleSubagentsActive = 0;
+      let oracleSubagentSample = "";
+      const { data: lifecycleRows } = await supabase
+        .from("agent_lifecycles")
+        .select("persona,status,spawn_time")
+        .eq("status", "active")
+        .order("spawn_time", { ascending: false })
+        .limit(6);
+      if (Array.isArray(lifecycleRows)) {
+        oracleSubagentsActive = lifecycleRows.length;
+        oracleSubagentSample = lifecycleRows
+          .map((row: any) => `${row.persona || "Adaptive Unit"} (active)`)
+          .join("\n");
+      }
+      if (!oracleSubagentSample) {
+        oracleSubagentSample = "No live Oracle subagents reported.";
+      }
 
       const freshEquity = freshAcc ? parseFloat(freshAcc.equity) : equity;
       const freshCash = freshAcc ? parseFloat(freshAcc.cash) : cash;
       const freshBP = freshAcc ? parseFloat(freshAcc.buying_power) : buyingPower;
       const freshPosArr = Array.isArray(freshPos) ? freshPos : posArr;
+      const deployedCapital = Math.max(0, freshEquity - freshCash);
 
       const executedBlock = executed.length > 0
         ? executed.map(e => `${e.action === "BUY" ? "🟢 BUY" : "🔴 SELL"} **${e.symbol}** x${e.qty} @ $${(e.fill || 0).toFixed(2)}${e.pnl ? ` (P&L: $${e.pnl.toFixed(2)})` : ""}`).join("\n")
@@ -641,6 +853,14 @@ Execute strategy.`
         : "Diversified (no positions)";
 
       const aiTradesLog = trades.map((t: any) => `**${t.action} ${t.symbol}** (Conviction: ${t.conviction})\n*Reasoning:* ${t.reasoning}`).join("\n\n");
+      const graphBlock = [
+        `Conviction Avg   ${spark(avgConviction)} ${(avgConviction * 100).toFixed(0)}%`,
+        `BUY Signal Mix   ${spark(buySignals, Math.max(1, trades.length))} ${buySignals}/${trades.length || 0}`,
+        `SELL Signal Mix  ${spark(sellSignals, Math.max(1, trades.length))} ${sellSignals}/${trades.length || 0}`,
+        `Execution Yield  ${spark(executed.length, Math.max(1, trades.length))} ${executed.length}/${trades.length || 0}`,
+        `Capital Deployed ${spark(deployedCapital, Math.max(1, freshEquity))} $${deployedCapital.toFixed(0)}/$${freshEquity.toFixed(0)}`,
+        `Core Active      ${spark(coreCounts.active, Math.max(1, coreTotal))} ${coreCounts.active}/${coreTotal || 0}`,
+      ].join("\n");
 
       const embeds = [
         {
@@ -654,15 +874,29 @@ Execute strategy.`
             `💰 Equity: **$${freshEquity.toFixed(2)}** | BP: $${freshBP.toFixed(2)}`,
             `📊 Daily P&L: **${dailyPnl >= 0 ? "+" : ""}$${dailyPnl.toFixed(2)}** (${dailyPnlPct.toFixed(2)}%)`,
             `🏗️ Positions: ${freshPosArr.length}/${maxOpenPositions} | Sector Exposure: ${sectorBlock}`,
+            `💵 Cash: $${freshCash.toFixed(2)} | Open Orders: ${ordersArr.length}`,
+            "",
+            "━━━ **SYSTEM GRAPHS** ━━━",
+            "```",
+            graphBlock,
+            "```",
             "",
             "━━━ **TRADES THIS CYCLE** ━━━",
             executedBlock,
             skippedBlock ? `\n━━━ **SKIPPED** ━━━\n${skippedBlock}` : "",
+            failed.length > 0 ? `\n━━━ **FAILED** ━━━\n${failed.map(f => `❌ ${f.symbol}: ${f.reason || "execution failure"}`).join("\n")}` : "",
             "",
             "━━━ **AI THESIS & REASONING** ━━━",
             `🧠 **Core Thesis:** ${brain.thesis || "Monitoring for setups."}`,
             "",
             aiTradesLog ? `**Trade Justifications:**\n${aiTradesLog}` : "*No trade justifications generated this cycle.*",
+            "",
+            "━━━ **SUBAGENT STATUS** ━━━",
+            `Core Agents: active ${coreCounts.active} | idle ${coreCounts.idle} | learning ${coreCounts.learning} | error ${coreCounts.error}`,
+            `Oracle Subagents (active ${oracleSubagentsActive}):`,
+            "```",
+            oracleSubagentSample,
+            "```",
           ].filter(Boolean).join("\n"),
           color: dailyPnl >= 0 ? 0x00ff41 : 0xff4444,
           footer: { text: `ACE_OS Omni-Brain | Next brief in ~30 min` },

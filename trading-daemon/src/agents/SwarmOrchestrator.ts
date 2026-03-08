@@ -6,7 +6,7 @@ import { OmniScanner } from './OmniScanner';
 import { RegimeOracle } from './RegimeOracle';
 import { PersonaManager } from './PersonaManager';
 import { DiscordDispatcher } from './DiscordDispatcher';
-import { logAgentAction } from '../supabase';
+import { logAgentAction, supabase } from '../supabase';
 import { alpaca } from '../alpaca';
 import axios from 'axios';
 import { TRADING_UNIVERSE, SECTORS, SOVEREIGN_PRIORITY_SECTORS } from '../universe';
@@ -38,6 +38,40 @@ export class SwarmOrchestrator {
 
     // timestamp of last discord post (ms)
     private lastDiscordTs = 0;
+
+    private spark(value: number, max = 1, width = 14): string {
+        const clamped = Math.max(0, Math.min(value, max));
+        const filled = Math.round((clamped / max) * width);
+        return `${'█'.repeat(filled)}${'░'.repeat(Math.max(0, width - filled))}`;
+    }
+
+    private async getCoreAgentStatusSummary() {
+        try {
+            const { data } = await supabase
+                .from('agent_state')
+                .select('agent_name,status');
+
+            const states = data || [];
+            const counts = {
+                active: 0,
+                idle: 0,
+                learning: 0,
+                error: 0,
+            };
+
+            for (const row of states as any[]) {
+                const status = String(row?.status || '').toLowerCase();
+                if (status === 'active') counts.active++;
+                else if (status === 'learning') counts.learning++;
+                else if (status === 'error') counts.error++;
+                else counts.idle++;
+            }
+
+            return { ...counts, total: states.length || 0 };
+        } catch {
+            return { active: 0, idle: 0, learning: 0, error: 0, total: 0 };
+        }
+    }
 
     async start() {
         this.isRunning = true;
@@ -235,6 +269,32 @@ export class SwarmOrchestrator {
 
     private async postDiscordBrief(signals: any[], executionResult: any, marketOpen: boolean, nowET: string, pulse: any) {
         const topSignals = [...signals].sort((a, b) => b.strength - a.strength).slice(0, 10);
+        const buySignals = signals.filter(s => s.signal_type === 'BUY').length;
+        const sellSignals = signals.filter(s => s.signal_type === 'SELL').length;
+        const avgStrength = signals.length > 0
+            ? signals.reduce((sum, s) => sum + (Number(s.strength) || 0), 0) / signals.length
+            : 0;
+        const executedCount = executionResult?.executed?.length || 0;
+        const queuedCount = executionResult?.queued?.length || 0;
+        const totalOutcomes = executedCount + queuedCount;
+
+        const coreStatuses = await this.getCoreAgentStatusSummary();
+        const liveSubagents = this.personas.getActiveAgents();
+        const subagentRoster = liveSubagents.length > 0
+            ? liveSubagents
+                .slice(0, 6)
+                .map(a => `${a.name} (${a.specialization || 'adaptive'})`)
+                .join('\n')
+            : 'No live Oracle subagents yet.';
+
+        const graphBlock = [
+            `Signal Strength  ${this.spark(avgStrength)} ${(avgStrength * 100).toFixed(0)}%`,
+            `News Sentiment   ${this.spark(pulse.newsSentiment)} ${(pulse.newsSentiment * 100).toFixed(0)}%`,
+            `Signal Mix (BUY) ${this.spark(buySignals, Math.max(1, signals.length))} ${buySignals}/${signals.length || 0}`,
+            `Signal Mix (SELL) ${this.spark(sellSignals, Math.max(1, signals.length))} ${sellSignals}/${signals.length || 0}`,
+            `Execution Yield  ${this.spark(totalOutcomes, Math.max(1, signals.length))} ${totalOutcomes}/${signals.length || 0}`,
+            `Core Active      ${this.spark(coreStatuses.active, Math.max(1, coreStatuses.total))} ${coreStatuses.active}/${coreStatuses.total || 0}`,
+        ].join('\n');
 
         const signalRows = topSignals.length > 0
             ? topSignals.map(s => {
@@ -261,6 +321,12 @@ export class SwarmOrchestrator {
                 `**Active Monitoring:** ${this.watchlist.slice(0, 15).join(', ')}${this.watchlist.length > 15 ? '...' : ''}`,
                 `**Actionable Signals Found:** ${signals.length}`,
                 `**Status:** ${marketOpen ? 'TRADING ACTIVE' : 'AWAITING HORIZON (Span Penalty Active)'}`,
+                `**Time (ET):** ${nowET}`,
+                '',
+                '**System Graphs**',
+                '```',
+                graphBlock,
+                '```',
                 '',
                 '**Intelligence Analysis**',
                 `> **Global Pulse:** ${pulse.macroSummary}`,
@@ -272,6 +338,13 @@ export class SwarmOrchestrator {
                 '**Execution Report**',
                 '```',
                 orderSummary,
+                '```',
+                '',
+                '**Subagent Status**',
+                `Core Agents: active ${coreStatuses.active} | idle ${coreStatuses.idle} | learning ${coreStatuses.learning} | error ${coreStatuses.error}`,
+                `Oracle Subagents (active ${liveSubagents.length}):`,
+                '```',
+                subagentRoster,
                 '```',
                 '',
                 `*Next descriptive summary in ${this.discordInterval} minutes.*`
