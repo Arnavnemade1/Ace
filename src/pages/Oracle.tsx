@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Layers, Database, Wifi } from "lucide-react";
+import { Brain, Database, Wifi } from "lucide-react";
 import RegimeDashboard from "@/components/RegimeDashboard";
 import SwarmMindsetControls from "@/components/SwarmMindsetControls";
 
@@ -68,10 +68,7 @@ export default function Oracle() {
                         <div className="grid grid-cols-1 xl:grid-cols-[0.7fr_0.3fr] gap-6">
                             <div>
                                 <div className="text-[11px] uppercase tracking-[0.32em] text-white/34 mb-4">Oracle</div>
-                                <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4 flex items-center gap-4">
-                                    <div className="p-3 border border-white/10 bg-black/10 text-[#d8c3a5]">
-                                        <Layers className="w-8 h-8" />
-                                    </div>
+                                <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4">
                                     Team Command Deck
                                 </h1>
                                 <p className="max-w-3xl text-lg leading-8 text-white/58">

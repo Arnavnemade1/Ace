@@ -82,7 +82,7 @@ serve(async (req) => {
           { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
         );
         const snapData = snapRes.ok ? await snapRes.json() : {};
-        const snap = snapData[trade.symbol];
+        const snap = snapData?.snapshots?.[trade.symbol] ?? snapData?.[trade.symbol];
         const refPrice = trade.side === "BUY"
           ? (snap?.latestQuote?.ap || snap?.latestTrade?.p)
           : (snap?.latestQuote?.bp || snap?.latestTrade?.p);
@@ -93,6 +93,10 @@ serve(async (req) => {
           continue;
         }
 
+        const limitPrice = trade.side === "BUY"
+          ? Number((refPrice * 1.001).toFixed(2))
+          : Number((refPrice * 0.999).toFixed(2));
+
         const orderBody: any = {
           symbol: trade.symbol,
           qty: String(Math.max(1, Math.round(trade.qty))),
@@ -101,9 +105,7 @@ serve(async (req) => {
           time_in_force: marketOpen ? "day" : "gtc",
         };
         if (!marketOpen) {
-          orderBody.limit_price = trade.side === "BUY"
-            ? Number((refPrice * 1.001).toFixed(2))
-            : Number((refPrice * 0.999).toFixed(2));
+          orderBody.limit_price = limitPrice;
         }
 
         const orderRes = await fetch(`${ALPACA_PAPER_URL}/v2/orders`, {

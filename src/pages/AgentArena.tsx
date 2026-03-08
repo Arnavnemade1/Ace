@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Terminal, Database, Activity, Wifi, Cpu, BarChart3, Clock, Eye, X } from "lucide-react";
+import { Terminal, Database, Activity, Wifi, BarChart3, Clock, Eye, X } from "lucide-react";
 
 interface AgentLog {
     id: string;
@@ -222,8 +222,8 @@ const AgentArena = () => {
                 <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-12 cursor-default">
                     <div className="border-t border-white/10 pt-6">
                     <div className="text-[11px] uppercase tracking-[0.32em] text-white/34 mb-4">Arena</div>
-                    <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4 flex items-center gap-4">
-                        <Cpu className="text-[#d8c3a5] w-12 h-12" /> Agent Arena
+                    <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4">
+                        Agent Arena
                     </h1>
                     <p className="text-white/58 text-lg max-w-3xl leading-8">Live monitoring for portfolio state, execution readiness, open orders, and the swarm’s internal decision stream.</p>
                     </div>
