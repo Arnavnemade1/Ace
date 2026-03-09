@@ -32,8 +32,8 @@ export interface BrainContext {
 }
 
 export class BrainAgent {
-    private apiKey = process.env.LOVABLE_API_KEY;
-    private baseUrl = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+    private apiKey = process.env.GEMINI_API_KEY;
+    private baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
     private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {
         let delay = initialDelay;
