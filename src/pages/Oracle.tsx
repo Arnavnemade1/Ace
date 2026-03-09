@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Database, Wifi, Newspaper, RefreshCw, TrendingUp, TrendingDown, Minus, Zap } from "lucide-react";
+import { Brain, Database, Wifi, Newspaper, RefreshCw, TrendingUp, TrendingDown, Minus, Zap, ChevronDown, ChevronUp, Globe, BarChart3 } from "lucide-react";
 import RegimeDashboard from "@/components/RegimeDashboard";
 import SwarmMindsetControls from "@/components/SwarmMindsetControls";
 import { toast } from "sonner";
@@ -80,6 +80,9 @@ export default function Oracle() {
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastScanInfo, setLastScanInfo] = useState<{ method: string; count: number; overall: number } | null>(null);
+  const [feedExpanded, setFeedExpanded] = useState(true);
+  const [feedFilter, setFeedFilter] = useState<"all" | "geopolitics" | "stocks">("all");
+  const [visibleCount, setVisibleCount] = useState(10);
 
   const activeCount = subagents.filter((agent) => agent.status === "active").length;
   const idleCount = subagents.filter((agent) => agent.status === "idle").length;
@@ -165,13 +168,32 @@ export default function Oracle() {
     };
   }, [fetchNews]);
 
-  // Compute aggregate stats from loaded articles
-  const bullishCount = newsArticles.filter((a) => (a.sentiment_hint ?? 0) >= 0.15).length;
-  const bearishCount = newsArticles.filter((a) => (a.sentiment_hint ?? 0) <= -0.15).length;
-  const neutralCount = newsArticles.length - bullishCount - bearishCount;
+  // Geopolitics keywords for filtering
+  const GEOPOLITICS_KEYWORDS = useMemo(() => /war|conflict|sanction|tariff|nato|china|russia|iran|israel|gaza|ukraine|taiwan|missile|nuclear|troops|military|defense|geopolit|sovereignty|embargo|oil|opec|treaty|alliance|invasion|border|diplomacy|summit|un\b|g7|g20|coup|election|regime/i, []);
+  const STOCK_KEYWORDS = useMemo(() => /stock|share|market|bull|bear|rally|crash|earnings|revenue|profit|loss|ipo|nasdaq|s&p|dow|nyse|fed|interest rate|inflation|gdp|unemployment|trade|sector|etf|bond|yield|dividend|buyback|merger|acquisition|\$[A-Z]{1,5}\b/i, []);
+
+  const filteredArticles = useMemo(() => {
+    let filtered = newsArticles;
+    if (feedFilter === "geopolitics") {
+      filtered = newsArticles.filter(a => GEOPOLITICS_KEYWORDS.test(`${a.title} ${a.summary || ""}`));
+    } else if (feedFilter === "stocks") {
+      filtered = newsArticles.filter(a => 
+        STOCK_KEYWORDS.test(`${a.title} ${a.summary || ""}`) || 
+        ((a.symbols as unknown as string[]) || []).length > 0
+      );
+    }
+    return filtered;
+  }, [newsArticles, feedFilter, GEOPOLITICS_KEYWORDS, STOCK_KEYWORDS]);
+
+  const displayedArticles = filteredArticles.slice(0, visibleCount);
+
+  // Compute aggregate stats from filtered articles
+  const bullishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) >= 0.15).length;
+  const bearishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) <= -0.15).length;
+  const neutralCount = filteredArticles.length - bullishCount - bearishCount;
   const avgSentiment =
-    newsArticles.length > 0
-      ? newsArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / newsArticles.length
+    filteredArticles.length > 0
+      ? filteredArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / filteredArticles.length
       : 0;
 
   return (
@@ -219,12 +241,34 @@ export default function Oracle() {
             {/* LIVE NEWS FEED WITH AI SENTIMENT                       */}
             {/* ═══════════════════════════════════════════════════════ */}
             <section>
-              <div className="flex items-center gap-3 mb-6 flex-wrap">
+              {/* Header with collapse toggle + filter tabs */}
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
                 <Newspaper className="w-5 h-5 text-[#9bb8d3]" />
                 <h2 className="text-sm tracking-[0.24em] uppercase text-white/50">Live Intel Feed</h2>
                 <div className="h-px flex-1 bg-white/8" />
 
-                {/* Sentiment aggregate chips */}
+                {/* Filter tabs */}
+                {(["all", "geopolitics", "stocks"] as const).map((tab) => {
+                  const isActive = feedFilter === tab;
+                  const icons = { all: Newspaper, geopolitics: Globe, stocks: BarChart3 };
+                  const Icon = icons[tab];
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => { setFeedFilter(tab); setVisibleCount(10); }}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] border transition-all ${
+                        isActive
+                          ? "border-[#d8c3a5]/40 bg-[#d8c3a5]/12 text-[#d8c3a5]"
+                          : "border-white/8 text-white/30 hover:text-white/50 hover:border-white/15"
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {tab}
+                    </button>
+                  );
+                })}
+
+                {/* Sentiment chips */}
                 <span className="text-[10px] px-2 py-1 border border-[#93d24a]/30 text-[#93d24a] bg-[#93d24a]/8">
                   ↑ {bullishCount}
                 </span>
@@ -245,16 +289,26 @@ export default function Oracle() {
                   <RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`} />
                   {isRefreshing ? "Scanning..." : "Scan Now"}
                 </motion.button>
+
+                {/* Collapse toggle */}
+                <button
+                  onClick={() => setFeedExpanded(!feedExpanded)}
+                  className="flex items-center gap-1 px-2 py-1 border border-white/8 text-white/30 hover:text-white/50 text-[10px] uppercase tracking-wider transition-colors"
+                >
+                  {feedExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  {feedExpanded ? "Collapse" : "Expand"}
+                </button>
               </div>
 
-              {/* Sentiment Gauge Bar */}
-              <div className="mb-6 border border-white/8 bg-black/10 p-4">
+              {/* Sentiment Gauge Bar — always visible */}
+              <div className="mb-4 border border-white/8 bg-black/10 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-[#d8c3a5]" />
                     <span className="text-[10px] uppercase tracking-[0.24em] text-white/40">
-                      Swarm Sentiment Pulse
+                      {feedFilter === "geopolitics" ? "Geopolitical" : feedFilter === "stocks" ? "Market" : "Swarm"} Sentiment Pulse
                     </span>
+                    <span className="text-[9px] text-white/20">({filteredArticles.length} articles)</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`text-lg font-display ${sentimentColor(avgSentiment)}`}>
@@ -268,7 +322,6 @@ export default function Oracle() {
                     )}
                   </div>
                 </div>
-                {/* Gradient bar */}
                 <div className="relative h-2 bg-gradient-to-r from-[#ff6b4a] via-[#d8c3a5] to-[#93d24a] rounded-full overflow-hidden">
                   <motion.div
                     className="absolute top-0 w-1 h-full bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.8)]"
@@ -283,109 +336,140 @@ export default function Oracle() {
                 </div>
               </div>
 
-              {/* News Grid */}
-              {newsArticles.length === 0 ? (
-                <div className="border border-white/8 bg-black/10 p-12 text-center">
-                  <Newspaper className="w-8 h-8 text-white/15 mx-auto mb-3" />
-                  <p className="text-sm text-white/30 mb-4">No articles yet. Trigger a scan to populate the feed.</p>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={triggerSentimentScan}
-                    disabled={isRefreshing}
-                    className="px-4 py-2 border border-[#d8c3a5]/30 bg-[#d8c3a5]/8 text-[#d8c3a5] text-xs uppercase tracking-[0.2em] hover:bg-[#d8c3a5]/15 transition-colors"
+              {/* Collapsible News Grid */}
+              <AnimatePresence initial={false}>
+                {feedExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    className="overflow-hidden"
                   >
-                    Initialize Swarm Scan
-                  </motion.button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <AnimatePresence mode="popLayout">
-                    {newsArticles.map((article, idx) => (
-                      <motion.div
-                        key={article.id}
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ delay: idx * 0.02, duration: 0.3 }}
-                        className={`group relative p-4 border ${sentimentBorder(article.sentiment_hint)} ${sentimentBg(article.sentiment_hint)} hover:bg-white/[0.04] transition-all cursor-default`}
-                      >
-                        {/* Sentiment edge glow */}
-                        <div
-                          className={`absolute left-0 top-0 bottom-0 w-[2px] ${
-                            (article.sentiment_hint ?? 0) >= 0.15
-                              ? "bg-[#93d24a]"
-                              : (article.sentiment_hint ?? 0) <= -0.15
-                              ? "bg-[#ff6b4a]"
-                              : "bg-white/10"
-                          }`}
-                        />
-
-                        <div className="flex items-start gap-3 pl-2">
-                          <div className={`mt-0.5 ${sentimentColor(article.sentiment_hint)}`}>
-                            <SentimentIcon score={article.sentiment_hint} />
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                              <span className="text-[9px] px-1.5 py-0.5 border border-white/10 text-white/35 uppercase tracking-wider">
-                                {article.source}
-                              </span>
-                              {article.symbols && (article.symbols as unknown as string[]).length > 0 && (
-                                (article.symbols as unknown as string[]).slice(0, 3).map((sym) => (
-                                  <span
-                                    key={sym}
-                                    className="text-[9px] px-1.5 py-0.5 border border-[#9bb8d3]/20 text-[#9bb8d3] bg-[#9bb8d3]/5 font-mono"
-                                  >
-                                    ${sym}
-                                  </span>
-                                ))
-                              )}
-                              <span className="text-[9px] text-white/20 ml-auto whitespace-nowrap">
-                                {timeAgo(article.published_at || article.created_at)}
-                              </span>
-                            </div>
-
-                            {article.url ? (
-                              <a
-                                href={article.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2 hover:underline"
+                    {filteredArticles.length === 0 ? (
+                      <div className="border border-white/8 bg-black/10 p-12 text-center">
+                        <Newspaper className="w-8 h-8 text-white/15 mx-auto mb-3" />
+                        <p className="text-sm text-white/30 mb-4">
+                          {newsArticles.length === 0
+                            ? "No articles yet. Trigger a scan to populate the feed."
+                            : `No ${feedFilter} articles found. Try a different filter or scan again.`}
+                        </p>
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={triggerSentimentScan}
+                          disabled={isRefreshing}
+                          className="px-4 py-2 border border-[#d8c3a5]/30 bg-[#d8c3a5]/8 text-[#d8c3a5] text-xs uppercase tracking-[0.2em] hover:bg-[#d8c3a5]/15 transition-colors"
+                        >
+                          Initialize Swarm Scan
+                        </motion.button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          <AnimatePresence mode="popLayout">
+                            {displayedArticles.map((article, idx) => (
+                              <motion.div
+                                key={article.id}
+                                initial={{ opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                transition={{ delay: idx * 0.02, duration: 0.3 }}
+                                className={`group relative p-4 border ${sentimentBorder(article.sentiment_hint)} ${sentimentBg(article.sentiment_hint)} hover:bg-white/[0.04] transition-all cursor-default`}
                               >
-                                {article.title}
-                              </a>
-                            ) : (
-                              <p className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2">
-                                {article.title}
-                              </p>
-                            )}
-
-                            {article.summary && (
-                              <p className="text-[11px] text-white/30 mt-1 line-clamp-1">{article.summary}</p>
-                            )}
-
-                            <div className="flex items-center gap-3 mt-2">
-                              <span
-                                className={`text-[10px] font-mono ${sentimentColor(article.sentiment_hint)}`}
-                              >
-                                {article.sentiment_hint !== null
-                                  ? `${article.sentiment_hint >= 0 ? "+" : ""}${article.sentiment_hint.toFixed(2)}`
-                                  : "N/A"}
-                              </span>
-                              {article.payload?.scored_by && (
-                                <span className="text-[8px] text-white/15 uppercase tracking-wider">
-                                  {article.payload.scored_by}
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                                <div
+                                  className={`absolute left-0 top-0 bottom-0 w-[2px] ${
+                                    (article.sentiment_hint ?? 0) >= 0.15
+                                      ? "bg-[#93d24a]"
+                                      : (article.sentiment_hint ?? 0) <= -0.15
+                                      ? "bg-[#ff6b4a]"
+                                      : "bg-white/10"
+                                  }`}
+                                />
+                                <div className="flex items-start gap-3 pl-2">
+                                  <div className={`mt-0.5 ${sentimentColor(article.sentiment_hint)}`}>
+                                    <SentimentIcon score={article.sentiment_hint} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                      <span className="text-[9px] px-1.5 py-0.5 border border-white/10 text-white/35 uppercase tracking-wider">
+                                        {article.source}
+                                      </span>
+                                      {article.symbols && (article.symbols as unknown as string[]).length > 0 &&
+                                        (article.symbols as unknown as string[]).slice(0, 3).map((sym) => (
+                                          <span
+                                            key={sym}
+                                            className="text-[9px] px-1.5 py-0.5 border border-[#9bb8d3]/20 text-[#9bb8d3] bg-[#9bb8d3]/5 font-mono"
+                                          >
+                                            ${sym}
+                                          </span>
+                                        ))}
+                                      <span className="text-[9px] text-white/20 ml-auto whitespace-nowrap">
+                                        {timeAgo(article.published_at || article.created_at)}
+                                      </span>
+                                    </div>
+                                    {article.url ? (
+                                      <a
+                                        href={article.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2 hover:underline"
+                                      >
+                                        {article.title}
+                                      </a>
+                                    ) : (
+                                      <p className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2">
+                                        {article.title}
+                                      </p>
+                                    )}
+                                    {article.summary && (
+                                      <p className="text-[11px] text-white/30 mt-1 line-clamp-1">{article.summary}</p>
+                                    )}
+                                    <div className="flex items-center gap-3 mt-2">
+                                      <span className={`text-[10px] font-mono ${sentimentColor(article.sentiment_hint)}`}>
+                                        {article.sentiment_hint !== null
+                                          ? `${article.sentiment_hint >= 0 ? "+" : ""}${article.sentiment_hint.toFixed(2)}`
+                                          : "N/A"}
+                                      </span>
+                                      {article.payload?.scored_by && (
+                                        <span className="text-[8px] text-white/15 uppercase tracking-wider">
+                                          {article.payload.scored_by}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
                         </div>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              )}
+
+                        {/* Show more / Show less controls */}
+                        <div className="flex items-center justify-center gap-4 mt-4">
+                          {visibleCount < filteredArticles.length && (
+                            <button
+                              onClick={() => setVisibleCount((v) => Math.min(v + 10, filteredArticles.length))}
+                              className="flex items-center gap-2 px-4 py-2 border border-white/10 text-white/40 text-[10px] uppercase tracking-[0.2em] hover:text-white/60 hover:border-white/20 transition-colors"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                              Show More ({filteredArticles.length - visibleCount} remaining)
+                            </button>
+                          )}
+                          {visibleCount > 10 && (
+                            <button
+                              onClick={() => setVisibleCount(10)}
+                              className="flex items-center gap-2 px-4 py-2 border border-white/10 text-white/40 text-[10px] uppercase tracking-[0.2em] hover:text-white/60 hover:border-white/20 transition-colors"
+                            >
+                              <ChevronUp className="w-3 h-3" />
+                              Collapse
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </section>
 
             {/* Subagent Status Matrix */}

@@ -140,8 +140,21 @@ serve(async (req) => {
       }).catch(() => [])
     );
 
-    // 4. Saurav Tech News API (keyless) — business, general, technology
-    for (const cat of ["business", "general", "technology"]) {
+    // 4. Knowivate Geopolitics / World news
+    newsFetchers.push(
+      fetch("https://news.knowivate.com/api/technologies").then(r => r.ok ? r.json() : []).then((articles: any) => {
+        const arr = Array.isArray(articles) ? articles : articles?.articles || articles?.data || [];
+        return arr.slice(0, 10).map((a: any) => ({
+          headline: a.title || a.headline || "", summary: a.description || a.summary || "",
+          symbols: [], source: "Knowivate-Tech", url: a.url || a.link || null,
+          published_at: a.publishedAt || a.published_at || null,
+          external_id: `knowtech-${(a.title || "").slice(0, 40)}`,
+        }));
+      }).catch(() => [])
+    );
+
+    // 5. Saurav — science (geopolitical/macro overlap) + health (pandemic risk)
+    for (const cat of ["business", "general", "technology", "science", "health"]) {
       newsFetchers.push(
         fetch(`https://saurav.tech/NewsAPI/top-headlines/category/${cat}/us.json`).then(r => r.ok ? r.json() : { articles: [] }).then((d: any) => {
           return (d.articles || []).slice(0, 10).map((a: any) => {
