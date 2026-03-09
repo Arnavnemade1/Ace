@@ -182,6 +182,45 @@ export class OmniScanner {
         } catch (e) { }
     }
 
+    // --- KEYLESS NEWS APIs ---
+    private async fetchKnowivateNews() {
+        try {
+            const { data } = await axios.get('https://news.knowivate.com/api/latest');
+            const articles = Array.isArray(data) ? data : data?.articles || data?.data || [];
+            const mapped = articles.slice(0, 20).map((a: any) => ({
+                title: a.title || a.headline || '',
+                description: a.description || a.summary || '',
+                source: 'Knowivate'
+            }));
+            await this.logToStream('Knowivate', 'GLOBAL_NEWS', mapped);
+        } catch (e) { }
+    }
+
+    private async fetchKnowivateBusinessNews() {
+        try {
+            const { data } = await axios.get('https://news.knowivate.com/api/business');
+            const articles = Array.isArray(data) ? data : data?.articles || data?.data || [];
+            const mapped = articles.slice(0, 15).map((a: any) => ({
+                title: a.title || a.headline || '',
+                description: a.description || a.summary || '',
+                source: 'Knowivate-Business'
+            }));
+            await this.logToStream('Knowivate-Biz', 'GLOBAL_NEWS', mapped);
+        } catch (e) { }
+    }
+
+    private async fetchSauravNews(category: string) {
+        try {
+            const { data } = await axios.get(`https://saurav.tech/NewsAPI/top-headlines/category/${category}/us.json`);
+            const articles = (data?.articles || []).slice(0, 10).map((a: any) => ({
+                title: a.title || '',
+                description: a.description || '',
+                source: `SauravNews-${category}`
+            }));
+            await this.logToStream(`SauravNews-${category}`, 'GLOBAL_NEWS', articles);
+        } catch (e) { }
+    }
+
     private async fetchOpenMeteo() {
         try {
             const { data } = await axios.get('https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.00&current=temperature_2m,precipitation,wind_speed_10m');
