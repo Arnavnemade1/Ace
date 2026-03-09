@@ -18,8 +18,8 @@ const MODEL_STACK = [
     'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-flash-latest'
+    'gemini-flash-latest',
+    'gemini-2.5-flash-lite'
 ];
 
 export class AIBridge {
