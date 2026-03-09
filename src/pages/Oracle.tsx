@@ -168,13 +168,32 @@ export default function Oracle() {
     };
   }, [fetchNews]);
 
-  // Compute aggregate stats from loaded articles
-  const bullishCount = newsArticles.filter((a) => (a.sentiment_hint ?? 0) >= 0.15).length;
-  const bearishCount = newsArticles.filter((a) => (a.sentiment_hint ?? 0) <= -0.15).length;
-  const neutralCount = newsArticles.length - bullishCount - bearishCount;
+  // Geopolitics keywords for filtering
+  const GEOPOLITICS_KEYWORDS = useMemo(() => /war|conflict|sanction|tariff|nato|china|russia|iran|israel|gaza|ukraine|taiwan|missile|nuclear|troops|military|defense|geopolit|sovereignty|embargo|oil|opec|treaty|alliance|invasion|border|diplomacy|summit|un\b|g7|g20|coup|election|regime/i, []);
+  const STOCK_KEYWORDS = useMemo(() => /stock|share|market|bull|bear|rally|crash|earnings|revenue|profit|loss|ipo|nasdaq|s&p|dow|nyse|fed|interest rate|inflation|gdp|unemployment|trade|sector|etf|bond|yield|dividend|buyback|merger|acquisition|\$[A-Z]{1,5}\b/i, []);
+
+  const filteredArticles = useMemo(() => {
+    let filtered = newsArticles;
+    if (feedFilter === "geopolitics") {
+      filtered = newsArticles.filter(a => GEOPOLITICS_KEYWORDS.test(`${a.title} ${a.summary || ""}`));
+    } else if (feedFilter === "stocks") {
+      filtered = newsArticles.filter(a => 
+        STOCK_KEYWORDS.test(`${a.title} ${a.summary || ""}`) || 
+        ((a.symbols as unknown as string[]) || []).length > 0
+      );
+    }
+    return filtered;
+  }, [newsArticles, feedFilter, GEOPOLITICS_KEYWORDS, STOCK_KEYWORDS]);
+
+  const displayedArticles = filteredArticles.slice(0, visibleCount);
+
+  // Compute aggregate stats from filtered articles
+  const bullishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) >= 0.15).length;
+  const bearishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) <= -0.15).length;
+  const neutralCount = filteredArticles.length - bullishCount - bearishCount;
   const avgSentiment =
-    newsArticles.length > 0
-      ? newsArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / newsArticles.length
+    filteredArticles.length > 0
+      ? filteredArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / filteredArticles.length
       : 0;
 
   return (
