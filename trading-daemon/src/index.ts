@@ -24,7 +24,7 @@ async function main() {
         await logAgentAction('Orchestrator', 'info', `Alpaca Connected: $${account.portfolio_value}`);
     } catch (error) {
         console.error('❌ Failed to connect to Alpaca', error);
-        process.exit(1);
+        throw error; // Let the boot loop handle the restart
     }
 
     // Start the Swarm Orchestrator loop
@@ -42,6 +42,14 @@ async function main() {
     }, 300000); // 5 minutes
 }
 
-main().catch(err => {
-    console.error('Fatal initialization error:', err);
-});
+async function boot() {
+    try {
+        await main();
+    } catch (err) {
+        console.error('⚠️ [CRASH] Daemon encountered a fatal error:', err);
+        console.log('🔄 Restarting brain in 10s...');
+        setTimeout(boot, 10000);
+    }
+}
+
+boot();
