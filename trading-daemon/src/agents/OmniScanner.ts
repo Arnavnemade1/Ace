@@ -37,6 +37,11 @@ export class OmniScanner {
             this.fetchCoinGecko(),
             this.fetchNewsAPI(contextQuery),
             this.fetchNewsData(contextQuery),
+            this.fetchKnowivateNews(),
+            this.fetchKnowivateBusinessNews(),
+            this.fetchSauravNews('business'),
+            this.fetchSauravNews('general'),
+            this.fetchSauravNews('technology'),
             this.fetchOpenMeteo(),
             this.fetchADSB(),
             this.fetchSportsArb()
