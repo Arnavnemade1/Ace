@@ -37,6 +37,11 @@ export class OmniScanner {
             this.fetchCoinGecko(),
             this.fetchNewsAPI(contextQuery),
             this.fetchNewsData(contextQuery),
+            this.fetchKnowivateNews(),
+            this.fetchKnowivateBusinessNews(),
+            this.fetchSauravNews('business'),
+            this.fetchSauravNews('general'),
+            this.fetchSauravNews('technology'),
             this.fetchOpenMeteo(),
             this.fetchADSB(),
             this.fetchSportsArb()
@@ -174,6 +179,45 @@ export class OmniScanner {
         try {
             const { data } = await axios.get(`https://newsdata.io/api/1/latest?apikey=${KEYS.NEWSDATA}&q=${encodeURIComponent(query)}&language=en`);
             await this.logToStream('NewsData.io', 'GLOBAL_NEWS', (data.results || []).slice(0, 10));
+        } catch (e) { }
+    }
+
+    // --- KEYLESS NEWS APIs ---
+    private async fetchKnowivateNews() {
+        try {
+            const { data } = await axios.get('https://news.knowivate.com/api/latest');
+            const articles = Array.isArray(data) ? data : data?.articles || data?.data || [];
+            const mapped = articles.slice(0, 20).map((a: any) => ({
+                title: a.title || a.headline || '',
+                description: a.description || a.summary || '',
+                source: 'Knowivate'
+            }));
+            await this.logToStream('Knowivate', 'GLOBAL_NEWS', mapped);
+        } catch (e) { }
+    }
+
+    private async fetchKnowivateBusinessNews() {
+        try {
+            const { data } = await axios.get('https://news.knowivate.com/api/business');
+            const articles = Array.isArray(data) ? data : data?.articles || data?.data || [];
+            const mapped = articles.slice(0, 15).map((a: any) => ({
+                title: a.title || a.headline || '',
+                description: a.description || a.summary || '',
+                source: 'Knowivate-Business'
+            }));
+            await this.logToStream('Knowivate-Biz', 'GLOBAL_NEWS', mapped);
+        } catch (e) { }
+    }
+
+    private async fetchSauravNews(category: string) {
+        try {
+            const { data } = await axios.get(`https://saurav.tech/NewsAPI/top-headlines/category/${category}/us.json`);
+            const articles = (data?.articles || []).slice(0, 10).map((a: any) => ({
+                title: a.title || '',
+                description: a.description || '',
+                source: `SauravNews-${category}`
+            }));
+            await this.logToStream(`SauravNews-${category}`, 'GLOBAL_NEWS', articles);
         } catch (e) { }
     }
 

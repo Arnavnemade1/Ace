@@ -36,18 +36,49 @@ serve(async (req) => {
     const lastSymbols = (scanState?.config?.last_symbols || []) as string[];
     const symbols = lastSymbols.length > 0 ? lastSymbols.slice(0, 50) : FALLBACK_WATCHLIST;
 
-    // Fetch news from Alpaca
-    let newsItems: any[] = [];
+    // Fetch news from ALL sources in parallel
+    const newsFetchers: Promise<any[]>[] = [];
+
+    // 1. Alpaca News (keyed)
     if (ALPACA_API_KEY && ALPACA_API_SECRET) {
-      const newsRes = await fetch(
-        `https://data.alpaca.markets/v1beta1/news?symbols=${symbols.join(",")}&limit=25`,
-        { headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET } }
+      newsFetchers.push(
+        fetch(`https://data.alpaca.markets/v1beta1/news?symbols=${symbols.join(",")}&limit=25`, {
+          headers: { "APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_API_SECRET },
+        }).then(r => r.ok ? r.json().then(d => (d.news || []).map((n: any) => ({ headline: n.headline, summary: n.summary, symbols: n.symbols, source: "Alpaca" }))) : []).catch(() => [])
       );
-      if (newsRes.ok) {
-        const newsData = await newsRes.json();
-        newsItems = newsData.news || [];
-      }
     }
+
+    // 2. Knowivate News API (keyless)
+    newsFetchers.push(
+      fetch("https://news.knowivate.com/api/latest").then(r => r.ok ? r.json() : []).then((articles: any) => {
+        const arr = Array.isArray(articles) ? articles : articles?.articles || articles?.data || [];
+        return arr.slice(0, 20).map((a: any) => ({ headline: a.title || a.headline || "", summary: a.description || a.summary || "", symbols: [], source: "Knowivate" }));
+      }).catch(() => [])
+    );
+
+    // 3. Knowivate Business category
+    newsFetchers.push(
+      fetch("https://news.knowivate.com/api/business").then(r => r.ok ? r.json() : []).then((articles: any) => {
+        const arr = Array.isArray(articles) ? articles : articles?.articles || articles?.data || [];
+        return arr.slice(0, 15).map((a: any) => ({ headline: a.title || a.headline || "", summary: a.description || a.summary || "", symbols: [], source: "Knowivate-Biz" }));
+      }).catch(() => [])
+    );
+
+    // 4. Saurav Tech News API (keyless) - business + general
+    for (const cat of ["business", "general", "technology"]) {
+      newsFetchers.push(
+        fetch(`https://saurav.tech/NewsAPI/top-headlines/category/${cat}/us.json`).then(r => r.ok ? r.json() : { articles: [] }).then((d: any) => {
+          return (d.articles || []).slice(0, 10).map((a: any) => {
+            // Try to match symbols from headline text
+            const matchedSymbols = symbols.filter(s => (a.title || "").toUpperCase().includes(s));
+            return { headline: a.title || "", summary: a.description || "", symbols: matchedSymbols, source: `SauravNews-${cat}` };
+          });
+        }).catch(() => [])
+      );
+    }
+
+    const allResults = await Promise.all(newsFetchers);
+    const newsItems = allResults.flat().filter((n: any) => n.headline && n.headline.length > 5);
 
     // ALGORITHMIC sentiment scoring — no AI call, saves API costs
     const symbolScores: Record<string, { scores: number[], reasons: string[] }> = {};

@@ -55,7 +55,7 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
 
       if (content) return content;
     } catch (e) {
-      console.log("Lovable AI failed after retries, falling back to Gemini direct:", e.message);
+      console.log("Lovable AI failed after retries, falling back to Gemini direct:", (e as Error).message);
     }
   }
 
