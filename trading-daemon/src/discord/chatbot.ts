@@ -1,12 +1,11 @@
 import { ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { supabase } from '../supabase';
 import { alpaca } from '../alpaca';
-import axios from 'axios';
-
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+import { aiBridge } from '../utils/AIBridge';
 
 async function gatherSystemContext(): Promise<string> {
     const sections: string[] = [];
+    // ... (rest of the context gathering logic)
 
     // Portfolio
     try {
@@ -20,7 +19,7 @@ async function gatherSystemContext(): Promise<string> {
                 sections.push(`### Positions\n${positions.slice(0, 15).map((pos: any) => `${pos.symbol}: ${pos.qty}x @ $${pos.avg_entry_price}`).join('\n')}`);
             }
         }
-    } catch {}
+    } catch { }
 
     // Regime
     try {
@@ -30,7 +29,7 @@ async function gatherSystemContext(): Promise<string> {
             const r = reg[0];
             sections.push(`## Market Regime\nType: ${r.regime_type} | Confidence: ${(r.confidence * 100).toFixed(0)}% | News Velocity: ${r.news_velocity}\nFactors: ${JSON.stringify(r.macro_factors)}`);
         }
-    } catch {}
+    } catch { }
 
     // Agent states
     try {
@@ -39,7 +38,7 @@ async function gatherSystemContext(): Promise<string> {
             const agentLines = agents.map(a => `${a.agent_name}: ${a.status}${a.last_action ? ` — ${a.last_action}` : ''}`);
             sections.push(`## Active Agents\n${agentLines.join('\n')}`);
         }
-    } catch {}
+    } catch { }
 
     // Recent trades
     try {
@@ -49,7 +48,7 @@ async function gatherSystemContext(): Promise<string> {
             const tradeLines = trades.map(t => `${t.side} ${t.qty}x ${t.symbol} @ $${t.price} — ${t.status} (${t.strategy})`);
             sections.push(`## Recent Trades\n${tradeLines.join('\n')}`);
         }
-    } catch {}
+    } catch { }
 
     // Recent signals
     try {
@@ -59,7 +58,7 @@ async function gatherSystemContext(): Promise<string> {
             const sigLines = sigs.map(s => `${s.signal_type} ${s.symbol} strength:${s.strength} from ${s.source_agent}`);
             sections.push(`## Recent Signals\n${sigLines.join('\n')}`);
         }
-    } catch {}
+    } catch { }
 
     // Recent news
     try {
@@ -70,7 +69,7 @@ async function gatherSystemContext(): Promise<string> {
             const newsLines = news.map(n => `[${n.source}] ${n.title} (sentiment: ${n.sentiment_hint?.toFixed(2) ?? 'N/A'})`);
             sections.push(`## Recent News\n${newsLines.join('\n')}`);
         }
-    } catch {}
+    } catch { }
 
     // Orchestrator config
     try {
@@ -79,13 +78,13 @@ async function gatherSystemContext(): Promise<string> {
         if (orch?.config) {
             sections.push(`## Orchestrator Config\n${JSON.stringify(orch.config)}`);
         }
-    } catch {}
+    } catch { }
 
     // Live account from Alpaca
     try {
         const account = await alpaca.getAccount();
         sections.push(`## Alpaca Live\nEquity: $${account.equity} | BP: $${account.buying_power} | Portfolio: $${account.portfolio_value}`);
-    } catch {}
+    } catch { }
 
     return sections.join('\n\n');
 }
@@ -97,22 +96,18 @@ export async function handleAskCommand(interaction: ChatInputCommandInteraction)
     try {
         const context = await gatherSystemContext();
 
-        const GEMINI_KEY = process.env.GEMINI_API_KEY;
-        if (!GEMINI_KEY) {
-            await interaction.editReply('AI not configured. Missing GEMINI_API_KEY.');
-            return;
-        }
-
         const systemPrompt = `You are ACE_OS, an autonomous AI trading system assistant. You have full visibility into the system state below. Answer questions about portfolio, trades, agents, market regime, signals, and news. Be concise, data-driven, and specific. Use numbers. If asked about strategy, reference the actual config and regime data.\n\n--- SYSTEM STATE ---\n${context}`;
 
-        const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_KEY}`, {
-            contents: [
-                { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }
-            ],
-            generationConfig: { maxOutputTokens: 2048 },
+        const response = await aiBridge.request(`User question: ${question}`, {
+            systemPrompt,
+            maxTokens: 2048
         });
 
-        const answer = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI.';
+        if (!response.success) {
+            throw new Error(response.error);
+        }
+
+        const answer = response.text || 'No response from AI.';
 
         // Split into chunks if too long for Discord
         const chunks = answer.match(/[\s\S]{1,4000}/g) || [answer];
@@ -128,12 +123,14 @@ export async function handleAskCommand(interaction: ChatInputCommandInteraction)
 
         // Send overflow as follow-ups
         for (let i = 1; i < chunks.length; i++) {
-            await interaction.followUp({ embeds: [
-                new EmbedBuilder().setDescription(chunks[i]).setColor(0x9B59B6)
-            ] });
+            await interaction.followUp({
+                embeds: [
+                    new EmbedBuilder().setDescription(chunks[i]).setColor(0x9B59B6)
+                ]
+            });
         }
     } catch (e: any) {
-        console.error('[Chatbot] AI error:', e?.response?.data || e?.message);
+        console.error('[Chatbot] AI error:', e?.message);
         await interaction.editReply(`AI error: ${e?.message || 'Unknown error'}`);
     }
 }

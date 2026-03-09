@@ -1,7 +1,7 @@
 import { alpaca } from '../alpaca';
 import { logAgentAction, supabase } from '../supabase';
-import axios from 'axios';
 import { DynamicPersona } from './PersonaManager';
+import { aiBridge } from '../utils/AIBridge';
 
 export type MarketRegimeType =
     | 'high-vol-reversion'
@@ -22,8 +22,6 @@ export interface RegimeState {
 
 export class RegimeOracle {
     private currentRegime: RegimeState | null = null;
-    private apiKey = process.env.LOVABLE_API_KEY;
-    private baseUrl = 'https://ai.gateway.lovable.dev/v1/chat/completions';
     private readonly TARGET_TEAM_SIZE = 3;
     private readonly genericNamePattern = /(momentum|intraday|day trader|trader|chaser|sniper|scalper|harvester|hunter|bot|agent\s*\d*|alpha seeker|quant bot)/i;
 
@@ -31,8 +29,6 @@ export class RegimeOracle {
      * Brainstorms the ideal swarm configuration based on the current regime and pulse.
      */
     async brainstormSwarm(pulse: any): Promise<DynamicPersona[]> {
-        if (!this.apiKey) return [];
-
         try {
             const regime = this.currentRegime || {
                 regime_type: 'low-vol-trend' as MarketRegimeType,
@@ -73,20 +69,17 @@ NEWS SENTIMENT: ${(pulse.newsSentiment * 100).toFixed(0)}% Bullish.
 
 Define the optimal team roster for this exact cycle.`;
 
-            const response = await axios.post(this.baseUrl, {
-                model: 'google/gemini-2.5-flash',
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                response_format: { type: 'json_object' }
-            }, {
-                headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-                timeout: 8000
+            const response = await aiBridge.request(userPrompt, {
+                systemPrompt,
+                responseMimeType: 'application/json',
+                maxTokens: 1024
             });
 
-            const result = response.data.choices[0].message.content;
-            const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+
+            const parsed = JSON.parse(response.text);
             const rawAgents = Array.isArray(parsed)
                 ? parsed
                 : (parsed?.agents || parsed?.team || parsed?.subagents || []);
