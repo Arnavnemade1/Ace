@@ -3,7 +3,7 @@ import { supabase } from '../supabase';
 import { alpaca } from '../alpaca';
 import axios from 'axios';
 
-const LOVABLE_AI_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 async function gatherSystemContext(): Promise<string> {
     const sections: string[] = [];
@@ -97,29 +97,22 @@ export async function handleAskCommand(interaction: ChatInputCommandInteraction)
     try {
         const context = await gatherSystemContext();
 
-        const LOVABLE_KEY = process.env.LOVABLE_API_KEY;
-        if (!LOVABLE_KEY) {
-            await interaction.editReply('AI gateway not configured. Missing LOVABLE_API_KEY.');
+        const GEMINI_KEY = process.env.GEMINI_API_KEY;
+        if (!GEMINI_KEY) {
+            await interaction.editReply('AI not configured. Missing GEMINI_API_KEY.');
             return;
         }
 
-        const response = await axios.post(LOVABLE_AI_URL, {
-            model: 'google/gemini-2.5-flash',
-            messages: [
-                {
-                    role: 'system',
-                    content: `You are ACE_OS, an autonomous AI trading system assistant. You have full visibility into the system state below. Answer questions about portfolio, trades, agents, market regime, signals, and news. Be concise, data-driven, and specific. Use numbers. If asked about strategy, reference the actual config and regime data.\n\n--- SYSTEM STATE ---\n${context}`
-                },
-                { role: 'user', content: question }
+        const systemPrompt = `You are ACE_OS, an autonomous AI trading system assistant. You have full visibility into the system state below. Answer questions about portfolio, trades, agents, market regime, signals, and news. Be concise, data-driven, and specific. Use numbers. If asked about strategy, reference the actual config and regime data.\n\n--- SYSTEM STATE ---\n${context}`;
+
+        const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_KEY}`, {
+            contents: [
+                { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }
             ],
-        }, {
-            headers: {
-                'Authorization': `Bearer ${LOVABLE_KEY}`,
-                'Content-Type': 'application/json',
-            },
+            generationConfig: { maxOutputTokens: 2048 },
         });
 
-        const answer = response.data?.choices?.[0]?.message?.content || 'No response from AI.';
+        const answer = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI.';
 
         // Split into chunks if too long for Discord
         const chunks = answer.match(/[\s\S]{1,4000}/g) || [answer];
