@@ -18,8 +18,8 @@ serve(async (req) => {
     );
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Portfolio Optimizer");
 
