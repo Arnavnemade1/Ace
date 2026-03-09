@@ -172,7 +172,7 @@ async function fetchSnapshots(symbols: string[], key: string, secret: string) {
       );
       if (res.ok) {
         const data = await res.json();
-        Object.assign(all, data);
+        Object.assign(all, data?.snapshots || data || {});
       }
     } catch { }
   }
@@ -666,7 +666,13 @@ Execute strategy.`
           type: marketOpen ? "market" : "limit",
           time_in_force: marketOpen ? "day" : "gtc",
         };
-        if (!marketOpen && refPrice) orderBody.limit_price = Number((refPrice * 1.002).toFixed(2));
+        if (!marketOpen) {
+          if (!refPrice) {
+            executionResults.push({ symbol: sym, status: "SKIPPED", reason: "No reference price for closed-market BUY limit order" });
+            continue;
+          }
+          orderBody.limit_price = Number((refPrice * 1.002).toFixed(2));
+        }
 
         const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
           method: "POST",
@@ -711,7 +717,13 @@ Execute strategy.`
           type: marketOpen ? "market" : "limit",
           time_in_force: marketOpen ? "day" : "gtc",
         };
-        if (!marketOpen && refPrice) orderBody.limit_price = Number((refPrice * 0.998).toFixed(2));
+        if (!marketOpen) {
+          if (!refPrice) {
+            executionResults.push({ symbol: sym, status: "SKIPPED", reason: "No reference price for closed-market SELL limit order" });
+            continue;
+          }
+          orderBody.limit_price = Number((refPrice * 0.998).toFixed(2));
+        }
 
         const orderRes = await fetch(`${ALPACA_URL}/v2/orders`, {
           method: "POST",
