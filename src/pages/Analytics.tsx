@@ -856,7 +856,7 @@ export default function Analytics() {
                   value={last.value}
                   delta={delta}
                   valuePrefix="$"
-                  data={series.rows}
+                  data={series.rows.map(({ label, value }) => ({ label, value }))}
                   color={colors[index % colors.length]}
                 />
               );
