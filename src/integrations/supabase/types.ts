@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_lifecycles: {
+        Row: {
+          created_at: string
+          death_reason: string | null
+          death_time: string | null
+          estimated_lifespan_ms: number
+          id: string
+          performance_contribution: number | null
+          persona: string
+          regime_affinity: string
+          spawn_time: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          death_reason?: string | null
+          death_time?: string | null
+          estimated_lifespan_ms: number
+          id?: string
+          performance_contribution?: number | null
+          persona: string
+          regime_affinity: string
+          spawn_time?: string
+          status: string
+        }
+        Update: {
+          created_at?: string
+          death_reason?: string | null
+          death_time?: string | null
+          estimated_lifespan_ms?: number
+          id?: string
+          performance_contribution?: number | null
+          persona?: string
+          regime_affinity?: string
+          spawn_time?: string
+          status?: string
+        }
+        Relationships: []
+      }
       agent_logs: {
         Row: {
           agent_name: string
@@ -83,6 +122,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_context_snapshots: {
+        Row: {
+          agent_name: string
+          created_at: string
+          id: string
+          scope: string
+          summary: Json
+        }
+        Insert: {
+          agent_name: string
+          created_at?: string
+          id?: string
+          scope: string
+          summary?: Json
+        }
+        Update: {
+          agent_name?: string
+          created_at?: string
+          id?: string
+          scope?: string
+          summary?: Json
+        }
+        Relationships: []
+      }
       live_api_streams: {
         Row: {
           created_at: string
@@ -104,6 +167,126 @@ export type Database = {
           payload?: Json
           source?: string
           symbol_or_context?: string
+        }
+        Relationships: []
+      }
+      market_quotes: {
+        Row: {
+          as_of: string
+          captured_at: string
+          change_percent: number | null
+          high: number | null
+          id: string
+          low: number | null
+          open: number | null
+          payload: Json
+          prev_close: number | null
+          price: number | null
+          source: string
+          symbol: string
+          volume: number | null
+        }
+        Insert: {
+          as_of: string
+          captured_at?: string
+          change_percent?: number | null
+          high?: number | null
+          id?: string
+          low?: number | null
+          open?: number | null
+          payload?: Json
+          prev_close?: number | null
+          price?: number | null
+          source: string
+          symbol: string
+          volume?: number | null
+        }
+        Update: {
+          as_of?: string
+          captured_at?: string
+          change_percent?: number | null
+          high?: number | null
+          id?: string
+          low?: number | null
+          open?: number | null
+          payload?: Json
+          prev_close?: number | null
+          price?: number | null
+          source?: string
+          symbol?: string
+          volume?: number | null
+        }
+        Relationships: []
+      }
+      market_regimes: {
+        Row: {
+          confidence: number
+          created_at: string
+          id: string
+          macro_factors: Json
+          news_velocity: number | null
+          regime_type: string
+        }
+        Insert: {
+          confidence: number
+          created_at?: string
+          id?: string
+          macro_factors?: Json
+          news_velocity?: number | null
+          regime_type: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          id?: string
+          macro_factors?: Json
+          news_velocity?: number | null
+          regime_type?: string
+        }
+        Relationships: []
+      }
+      news_articles: {
+        Row: {
+          created_at: string
+          external_id: string
+          id: string
+          keywords: Json
+          payload: Json
+          published_at: string | null
+          sentiment_hint: number | null
+          source: string
+          summary: string | null
+          symbols: Json
+          title: string
+          url: string | null
+        }
+        Insert: {
+          created_at?: string
+          external_id: string
+          id?: string
+          keywords?: Json
+          payload?: Json
+          published_at?: string | null
+          sentiment_hint?: number | null
+          source: string
+          summary?: string | null
+          symbols?: Json
+          title: string
+          url?: string | null
+        }
+        Update: {
+          created_at?: string
+          external_id?: string
+          id?: string
+          keywords?: Json
+          payload?: Json
+          published_at?: string | null
+          sentiment_hint?: number | null
+          source?: string
+          summary?: string | null
+          symbols?: Json
+          title?: string
+          url?: string | null
         }
         Relationships: []
       }
@@ -158,6 +341,72 @@ export type Database = {
           total_value?: number
           updated_at?: string
           win_rate?: number | null
+        }
+        Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string | null
+          created_at: string
+          endpoint: string
+          id: string
+          p256dh: string | null
+          subscription: Json
+          updated_at: string
+          user_agent: string | null
+        }
+        Insert: {
+          auth?: string | null
+          created_at?: string
+          endpoint: string
+          id?: string
+          p256dh?: string | null
+          subscription: Json
+          updated_at?: string
+          user_agent?: string | null
+        }
+        Update: {
+          auth?: string | null
+          created_at?: string
+          endpoint?: string
+          id?: string
+          p256dh?: string | null
+          subscription?: Json
+          updated_at?: string
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
+      regime_shifts: {
+        Row: {
+          agents_retired: number
+          agents_spawned: number
+          confidence: number
+          created_at: string
+          from_regime: string
+          id: string
+          to_regime: string
+          trigger_factors: Json | null
+        }
+        Insert: {
+          agents_retired?: number
+          agents_spawned?: number
+          confidence?: number
+          created_at?: string
+          from_regime: string
+          id?: string
+          to_regime: string
+          trigger_factors?: Json | null
+        }
+        Update: {
+          agents_retired?: number
+          agents_spawned?: number
+          confidence?: number
+          created_at?: string
+          from_regime?: string
+          id?: string
+          to_regime?: string
+          trigger_factors?: Json | null
         }
         Relationships: []
       }
