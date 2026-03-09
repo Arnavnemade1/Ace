@@ -48,10 +48,12 @@ export const alpaca = {
     // [x] Phase 33: Historical Bars for Technical Analysis
     getBars: async (symbol: string, start: string, timeframe = '1Day', limit = 100) => {
         const bars: any[] = [];
+        // Forced to 'iex' for free-tier compatibility (SIP data requires paid subscription)
         const resp = alpacaClient.getBarsV2(symbol, {
             start,
             timeframe,
-            limit
+            limit,
+            feed: 'iex'
         });
         for await (const b of resp) {
             bars.push(b);
