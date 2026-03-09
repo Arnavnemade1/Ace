@@ -80,6 +80,9 @@ export default function Oracle() {
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastScanInfo, setLastScanInfo] = useState<{ method: string; count: number; overall: number } | null>(null);
+  const [feedExpanded, setFeedExpanded] = useState(true);
+  const [feedFilter, setFeedFilter] = useState<"all" | "geopolitics" | "stocks">("all");
+  const [visibleCount, setVisibleCount] = useState(10);
 
   const activeCount = subagents.filter((agent) => agent.status === "active").length;
   const idleCount = subagents.filter((agent) => agent.status === "idle").length;
