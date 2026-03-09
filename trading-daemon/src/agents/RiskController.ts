@@ -213,8 +213,28 @@ export class RiskController {
                 // don't propose a trade that uses more than the leftover daily budget
                 effectiveMax = Math.min(effectiveMax, remainingDailyBudget);
             }
-            const qty = Math.max(1, Math.floor(effectiveMax / price));
+            let qty = Math.max(1, Math.floor(effectiveMax / price));
             const side = signal.signal_type.toLowerCase() as 'buy' | 'sell';
+
+            // For SELL orders: use actual available position qty to avoid "insufficient qty" errors
+            if (side === 'sell') {
+                const position = currentPositions.find((p: any) => p.symbol === signal.symbol);
+                const posQty = position ? parseInt(position.qty, 10) : 0;
+                // Check for open sell orders that are holding qty
+                const { data: openSellOrders } = await supabase
+                    .from('trades')
+                    .select('qty')
+                    .eq('symbol', signal.symbol)
+                    .eq('side', 'SELL')
+                    .in('status', ['pending', 'submitted', 'accepted', 'new', 'partially_filled']);
+                const heldQty = (openSellOrders || []).reduce((sum: number, o: any) => sum + (o.qty || 0), 0);
+                const availableQty = Math.max(0, posQty - heldQty);
+                if (availableQty <= 0) {
+                    console.log(`[Risk Guard] No available qty for SELL ${signal.symbol} (held: ${heldQty}/${posQty}). Skipping.`);
+                    continue;
+                }
+                qty = Math.min(qty, availableQty);
+            }
 
             if (side === 'buy') {
                 // ensure buying power reserve remains after executing this quantity
