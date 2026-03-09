@@ -3,7 +3,7 @@ import { supabase } from '../supabase';
 import { alpaca } from '../alpaca';
 import axios from 'axios';
 
-const LOVABLE_AI_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 async function gatherSystemContext(): Promise<string> {
     const sections: string[] = [];
