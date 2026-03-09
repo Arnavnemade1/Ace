@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Database, Wifi, Newspaper, RefreshCw, TrendingUp, TrendingDown, Minus, Zap } from "lucide-react";
+import { Brain, Database, Wifi, Newspaper, RefreshCw, TrendingUp, TrendingDown, Minus, Zap, ChevronDown, ChevronUp, Globe, BarChart3 } from "lucide-react";
 import RegimeDashboard from "@/components/RegimeDashboard";
 import SwarmMindsetControls from "@/components/SwarmMindsetControls";
 import { toast } from "sonner";
