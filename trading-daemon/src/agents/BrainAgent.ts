@@ -102,23 +102,21 @@ Current Holding(qty): ${context.portfolio.positions.find(p => p.symbol === conte
 - Synthesize all inputs and output your definitive strategy.` ;
 
             const response = await this.withRetry(async () => {
-                return await axios.post(this.baseUrl, {
-                    model: 'google/gemini-2.5-flash', // Switching to 2.5 Flash (Free Tier) for 2026 context
-                    messages: [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: userPrompt }
+                return await axios.post(`${this.baseUrl}?key=${this.apiKey}`, {
+                    contents: [
+                        { role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }
                     ],
-                    response_format: { type: 'json_object' }
+                    generationConfig: { 
+                        responseMimeType: 'application/json',
+                        maxOutputTokens: 1024 
+                    }
                 }, {
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 10000
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: 15000
                 });
             });
 
-            const result = response.data.choices[0].message.content;
+            const result = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
             const parsedResult = typeof result === 'string' ? JSON.parse(result) : result;
             return {
                 action: parsedResult.action || 'HOLD',
