@@ -97,18 +97,8 @@ serve(async (req) => {
       ? `Equity: $${account.equity}, Cash: $${account.cash}, Buying Power: $${account.buying_power}`
       : "No account data";
 
-    // AI optimization
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "system",
-            content: `You are the Portfolio Optimizer agent. You continuously rebalance using Markowitz-enhanced allocation principles:
+    // AI optimization via Gemini direct
+    const systemPrompt = `You are the Portfolio Optimizer agent. You continuously rebalance using Markowitz-enhanced allocation principles:
 
 1. Calculate current allocation weights
 2. Estimate expected returns and covariances
@@ -116,69 +106,37 @@ serve(async (req) => {
 4. Suggest rebalancing trades to move toward optimal allocation
 5. Consider transaction costs and tax implications
 
-Also calculate portfolio metrics: Sharpe ratio, Sortino ratio, max drawdown.`,
-          },
-          {
-            role: "user",
-            content: `Current positions:\n${positionsSummary}\n\nAccount:\n${accountSummary}\n\nRecent trade count: ${allTrades?.length || 0}\n\nAnalyze and suggest rebalancing.`,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "optimization_results",
-              description: "Portfolio optimization results",
-              parameters: {
-                type: "object",
-                properties: {
-                  sharpe_ratio: { type: "number" },
-                  sortino_ratio: { type: "number" },
-                  max_drawdown: { type: "number" },
-                  current_allocations: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        symbol: { type: "string" },
-                        current_weight: { type: "number" },
-                        optimal_weight: { type: "number" },
-                      },
-                      required: ["symbol", "current_weight", "optimal_weight"],
-                    },
-                  },
-                  rebalance_trades: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        symbol: { type: "string" },
-                        side: { type: "string", enum: ["BUY", "SELL"] },
-                        qty: { type: "number" },
-                        reasoning: { type: "string" },
-                      },
-                      required: ["symbol", "side", "qty", "reasoning"],
-                    },
-                  },
-                },
-                required: ["sharpe_ratio", "current_allocations", "rebalance_trades"],
-              },
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "optimization_results" } },
+Also calculate portfolio metrics: Sharpe ratio, Sortino ratio, max drawdown.
+
+Respond ONLY with a JSON object with this exact structure:
+{
+  "sharpe_ratio": number,
+  "sortino_ratio": number,
+  "max_drawdown": number,
+  "current_allocations": [{"symbol": "string", "current_weight": number, "optimal_weight": number}],
+  "rebalance_trades": [{"symbol": "string", "side": "BUY" or "SELL", "qty": number, "reasoning": "string"}]
+}`;
+
+    const userPrompt = `Current positions:\n${positionsSummary}\n\nAccount:\n${accountSummary}\n\nRecent trade count: ${allTrades?.length || 0}\n\nAnalyze and suggest rebalancing.`;
+
+    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
       }),
     });
 
-    if (!aiResponse.ok) throw new Error(`AI gateway error: ${aiResponse.status}`);
+    if (!aiResponse.ok) throw new Error(`Gemini API error: ${aiResponse.status}`);
 
     const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
     let optResult = { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] } as any;
 
-    if (toolCall?.function?.arguments) {
-      optResult = JSON.parse(toolCall.function.arguments);
-    }
+    try {
+      optResult = JSON.parse(rawText);
+    } catch { /* use defaults */ }
 
     // Submit rebalance trades as pending
     for (const trade of optResult.rebalance_trades) {

@@ -161,13 +161,13 @@ serve(async (req) => {
     // ═══════════════════════════════════════════════════════
     // PHASE 2: AI-powered sentiment scoring via the swarm
     // ═══════════════════════════════════════════════════════
-    let useAI = !!LOVABLE_API_KEY;
+    let useAI = !!GEMINI_API_KEY;
     let aiScores: Record<number, number> = {};
 
     if (useAI) {
       aiScores = await aiSentimentBatch(
         newsItems.map(n => ({ headline: n.headline, source: n.source })),
-        LOVABLE_API_KEY!
+        GEMINI_API_KEY!
       );
       // If AI returned nothing, fall back to keyword
       if (Object.keys(aiScores).length === 0) useAI = false;
