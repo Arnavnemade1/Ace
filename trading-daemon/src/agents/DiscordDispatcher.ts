@@ -31,13 +31,13 @@ export class DiscordDispatcher {
         }
     }
 
-    static async postTradeAlert(symbol: string, action: 'BUY' | 'SELL', qty: number, price: number, reasoning: string) {
+    static async postTradeAlert(symbol: string, action: 'BUY' | 'SELL', qty: number, price: number, reasoning: string, alpacaOrderId?: string) {
         if (!this.enabled()) return;
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         if (!WEBHOOK_URL) return;
         const color = action === 'BUY' ? 3066993 : 15158332;
         try {
-            await axios.post(WEBHOOK_URL, {
+            const payload: any = {
                 embeds: [{
                     title: `ORDER EXECUTED — ${action} ${symbol}`,
                     description: [
@@ -54,7 +54,9 @@ export class DiscordDispatcher {
                     timestamp: new Date().toISOString(),
                     footer: { text: "ACE_OS — Alpaca Paper API" }
                 }]
-            });
+            };
+
+            await axios.post(WEBHOOK_URL, payload);
         } catch (e) {
             console.error(`[Discord] Failed to post trade alert:`, e);
         }
