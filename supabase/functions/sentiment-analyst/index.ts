@@ -22,7 +22,7 @@ function keywordScore(text: string): number {
   return Math.max(-1, Math.min(1, score));
 }
 
-// AI-powered batch sentiment analysis via Lovable AI Gateway
+// AI-powered batch sentiment analysis via Gemini direct API
 async function aiSentimentBatch(
   headlines: { headline: string; source: string }[],
   apiKey: string
@@ -30,41 +30,26 @@ async function aiSentimentBatch(
   const scores: Record<number, number> = {};
   if (!headlines.length) return scores;
 
-  // Batch up to 25 headlines per AI call
   const batch = headlines.slice(0, 25);
   const numberedList = batch.map((h, i) => `${i + 1}. [${h.source}] ${h.headline}`).join("\n");
 
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
-        messages: [
-          {
-            role: "system",
-            content: `You are a financial sentiment analysis engine for an autonomous trading swarm. Score each headline from -1.0 (extremely bearish) to +1.0 (extremely bullish). Consider market impact, not just tone. Respond ONLY with a JSON object mapping headline number to score. Example: {"1": 0.7, "2": -0.3, "3": 0.0}`,
-          },
-          {
-            role: "user",
-            content: `Score these market headlines:\n${numberedList}`,
-          },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.1,
+        contents: [{ role: "user", parts: [{ text: `You are a financial sentiment analysis engine for an autonomous trading swarm. Score each headline from -1.0 (extremely bearish) to +1.0 (extremely bullish). Consider market impact, not just tone. Respond ONLY with a JSON object mapping headline number to score. Example: {"1": 0.7, "2": -0.3, "3": 0.0}\n\nScore these market headlines:\n${numberedList}` }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 1024 },
       }),
     });
 
     if (!res.ok) {
-      console.error("AI sentiment failed:", res.status, await res.text());
+      console.error("Gemini sentiment failed:", res.status, await res.text());
       return scores;
     }
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (content) {
       const parsed = typeof content === "string" ? JSON.parse(content) : content;
       for (const [key, val] of Object.entries(parsed)) {
@@ -88,7 +73,7 @@ serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Sentiment Analyst");
 
@@ -176,13 +161,13 @@ serve(async (req) => {
     // ═══════════════════════════════════════════════════════
     // PHASE 2: AI-powered sentiment scoring via the swarm
     // ═══════════════════════════════════════════════════════
-    let useAI = !!LOVABLE_API_KEY;
+    let useAI = !!GEMINI_API_KEY;
     let aiScores: Record<number, number> = {};
 
     if (useAI) {
       aiScores = await aiSentimentBatch(
         newsItems.map(n => ({ headline: n.headline, source: n.source })),
-        LOVABLE_API_KEY!
+        GEMINI_API_KEY!
       );
       // If AI returned nothing, fall back to keyword
       if (Object.keys(aiScores).length === 0) useAI = false;

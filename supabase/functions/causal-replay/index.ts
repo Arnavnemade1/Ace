@@ -14,8 +14,8 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
 
     await supabase.from("agent_state").update({ status: "learning", updated_at: new Date().toISOString() }).eq("agent_name", "Causal Replay");
 
@@ -45,18 +45,8 @@ serve(async (req) => {
       `${t.side} ${t.qty} ${t.symbol} @ $${t.price} | Strategy: ${t.strategy} | P&L: ${t.pnl !== null ? `$${t.pnl}` : "open"} | Reasoning: ${t.reasoning}`
     ).join("\n");
 
-    // AI counterfactual analysis
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "system",
-            content: `You are the Causal Replay agent. You perform nightly counterfactual analysis on the day's trades. For each trade, ask:
+    // AI counterfactual analysis via Gemini direct
+    const systemPrompt = `You are the Causal Replay agent. You perform nightly counterfactual analysis on the day's trades. For each trade, ask:
 - What if we had waited 30 minutes?
 - What if we had sized 50% larger or smaller?
 - What if we had used a different signal threshold?
@@ -64,77 +54,37 @@ serve(async (req) => {
 
 Identify patterns: which strategies consistently underperform? Which signal types lead to the best trades? What timing patterns emerge?
 
-Provide concrete, actionable improvement suggestions.`,
-          },
-          {
-            role: "user",
-            content: `Replay these trades:\n${tradesSummary}\n\nRelated signals: ${JSON.stringify(relatedSignals?.slice(0, 10))}`,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "replay_results",
-              description: "Results of counterfactual analysis",
-              parameters: {
-                type: "object",
-                properties: {
-                  trade_analyses: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        trade_id: { type: "string" },
-                        counterfactuals: {
-                          type: "array",
-                          items: {
-                            type: "object",
-                            properties: {
-                              scenario: { type: "string" },
-                              estimated_outcome: { type: "string" },
-                              would_have_been_better: { type: "boolean" },
-                            },
-                            required: ["scenario", "estimated_outcome", "would_have_been_better"],
-                          },
-                        },
-                      },
-                      required: ["trade_id", "counterfactuals"],
-                    },
-                  },
-                  patterns_identified: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                  patterns_to_prune: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                  improvement_suggestions: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                  overall_improvement_score: { type: "number" },
-                },
-                required: ["trade_analyses", "patterns_identified", "patterns_to_prune", "improvement_suggestions", "overall_improvement_score"],
-              },
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "replay_results" } },
+Provide concrete, actionable improvement suggestions.
+
+Respond ONLY with a JSON object with this exact structure:
+{
+  "trade_analyses": [{"trade_id": "string", "counterfactuals": [{"scenario": "string", "estimated_outcome": "string", "would_have_been_better": true/false}]}],
+  "patterns_identified": ["string"],
+  "patterns_to_prune": ["string"],
+  "improvement_suggestions": ["string"],
+  "overall_improvement_score": 0-100
+}`;
+
+    const userPrompt = `Replay these trades:\n${tradesSummary}\n\nRelated signals: ${JSON.stringify(relatedSignals?.slice(0, 10))}`;
+
+    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
       }),
     });
 
-    if (!aiResponse.ok) throw new Error(`AI gateway error: ${aiResponse.status}`);
+    if (!aiResponse.ok) throw new Error(`Gemini API error: ${aiResponse.status}`);
 
     const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
     let replayResult = { trade_analyses: [], patterns_identified: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0 } as any;
 
-    if (toolCall?.function?.arguments) {
-      replayResult = JSON.parse(toolCall.function.arguments);
-    }
-
+    try {
+      replayResult = JSON.parse(rawText);
+    } catch { /* use defaults */ }
     // Store replay results
     for (const analysis of replayResult.trade_analyses) {
       await supabase.from("replay_results").insert({
