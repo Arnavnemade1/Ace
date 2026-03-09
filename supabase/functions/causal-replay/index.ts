@@ -84,8 +84,7 @@ Respond ONLY with a JSON object with this exact structure:
 
     try {
       replayResult = JSON.parse(rawText);
-    }
-
+    } catch { /* use defaults */ }
     // Store replay results
     for (const analysis of replayResult.trade_analyses) {
       await supabase.from("replay_results").insert({
