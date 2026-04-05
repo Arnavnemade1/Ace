@@ -106,12 +106,8 @@ export class OmniScanner {
                 this.results[source] = payload;
             }
 
-            // Maintain Supabase log for UI
-            const { error } = await supabase.from('live_api_streams').insert({ source, symbol_or_context, payload });
-            if (error) {
-                console.error(`[OmniScanner DB Error] ${source}: ${error.message}`);
-                await logAgentAction('OmniScanner', 'error', `live_api_streams insert failed: ${source}`, error.message);
-            }
+            // Removed Supabase log for live_api_streams to drastically cut down DB Egress & Size quotas.
+            // Payload remains in memory (`this.results`) for the active evaluation cycle.
         } catch (e: any) {
             console.error(`[OmniScanner DB Error] ${source}`, e);
             await logAgentAction('OmniScanner', 'error', `live_api_streams insert failed: ${source}`, e?.message || 'Unknown error');

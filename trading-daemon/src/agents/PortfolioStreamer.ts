@@ -37,16 +37,8 @@ export class PortfolioStreamer {
                 updated_at: new Date().toISOString(),
             };
 
-            // Upsert on id
-            const { error } = await (supabase as any)
-                .from('portfolio_state')
-                .upsert(portfolioState, { onConflict: 'id' });
-
-            if (error) {
-                console.error('[PortfolioStreamer] Upsert failed:', error.message);
-            } else {
-                console.log(`[PortfolioStreamer] Updated: $${portfolioState.total_value.toFixed(2)} | ${positions.length} positions`);
-            }
+            // Deprecated Supabase Update to save on realtime messages and DB Ego
+            console.log(`[PortfolioStreamer] Local Update: $${portfolioState.total_value.toFixed(2)} | ${positions.length} positions`);
 
             return portfolioState;
         } catch (err: any) {

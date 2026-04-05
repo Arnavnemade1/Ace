@@ -27,6 +27,11 @@ export async function checkSupabaseConnection(): Promise<{ ok: boolean; error?: 
 }
 
 export async function logAgentAction(agent: string, type: 'info' | 'decision' | 'error' | 'learning' | 'trade', message: string, reasoning?: string, metadata?: any) {
+    if (type === 'info') {
+        // Drop generic info prints from hitting Supabase entirely to save heavy limits
+        return;
+    }
+
     try {
         const { error } = await supabase
             .from('agent_logs')

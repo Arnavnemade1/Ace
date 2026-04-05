@@ -442,7 +442,7 @@ export default function Analytics() {
           supabase.from("agent_state").select("*").order("updated_at", { ascending: false }),
           supabase.from("agent_logs").select("*").order("created_at", { ascending: false }).limit(250),
           supabase.from("replay_results").select("*").order("created_at", { ascending: false }).limit(80),
-          supabase.from("live_api_streams").select("*").order("created_at", { ascending: false }).limit(220),
+          Promise.resolve({ data: [], error: null }), // Mocked to save quota! 
           (supabase as any).from("market_quotes").select("source, symbol, price, change_percent, as_of").order("as_of", { ascending: false }).limit(320),
           (supabase as any).from("news_articles").select("id, source, title, summary, published_at, url, sentiment_hint, symbols").order("published_at", { ascending: false }).limit(14),
           (supabase as any).from("ai_context_snapshots").select("id, agent_name, scope, summary, created_at").order("created_at", { ascending: false }).limit(40),
@@ -500,7 +500,6 @@ export default function Analytics() {
       "agent_state",
       "portfolio_state",
       "replay_results",
-      "live_api_streams",
       "market_quotes",
       "news_articles",
       "ai_context_snapshots",
