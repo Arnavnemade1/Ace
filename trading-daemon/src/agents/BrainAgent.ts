@@ -134,7 +134,9 @@ Synthesize all inputs and provide your definitive assessment.`;
             const response = await aiBridge.request(userPrompt, {
                 systemPrompt,
                 responseMimeType: 'application/json',
-                maxTokens: 1024
+                maxTokens: 2048,
+                model: 'gemini-2.5-pro', // Upgraded: deeper reasoning for trade synthesis
+                temperature: 0.4 // Lower temp for more deterministic, disciplined decisions
             });
 
             if (!response.success) {
