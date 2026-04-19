@@ -22,45 +22,77 @@ function keywordScore(text: string): number {
   return Math.max(-1, Math.min(1, score));
 }
 
-// AI-powered batch sentiment analysis via Gemini direct API
+// AI-powered batch sentiment analysis: Gemini primary → Lovable AI fallback
 async function aiSentimentBatch(
   headlines: { headline: string; source: string }[],
-  apiKey: string
+  geminiKey: string,
+  lovableKey: string
 ): Promise<Record<number, number>> {
   const scores: Record<number, number> = {};
   if (!headlines.length) return scores;
 
   const batch = headlines.slice(0, 25);
   const numberedList = batch.map((h, i) => `${i + 1}. [${h.source}] ${h.headline}`).join("\n");
+  const prompt = `You are a financial sentiment engine. Score each headline from -1.0 (extremely bearish) to +1.0 (extremely bullish). Respond ONLY with a JSON object mapping headline number to score. Example: {"1": 0.7, "2": -0.3}\n\nHeadlines:\n${numberedList}`;
 
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `You are a financial sentiment analysis engine for an autonomous trading swarm. Score each headline from -1.0 (extremely bearish) to +1.0 (extremely bullish). Consider market impact, not just tone. Respond ONLY with a JSON object mapping headline number to score. Example: {"1": 0.7, "2": -0.3, "3": 0.0}\n\nScore these market headlines:\n${numberedList}` }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 1024 },
-      }),
-    });
-
-    if (!res.ok) {
-      console.error("Gemini sentiment failed:", res.status, await res.text());
-      return scores;
-    }
-
-    const data = await res.json();
-    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (content) {
-      const parsed = typeof content === "string" ? JSON.parse(content) : content;
-      for (const [key, val] of Object.entries(parsed)) {
-        const idx = parseInt(key, 10) - 1;
-        if (!isNaN(idx) && typeof val === "number") {
-          scores[idx] = Math.max(-1, Math.min(1, val));
+  // Try Gemini first
+  if (geminiKey) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 1024 },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (content) {
+          const parsed = typeof content === "string" ? JSON.parse(content) : content;
+          for (const [k, v] of Object.entries(parsed)) {
+            const idx = parseInt(k, 10) - 1;
+            if (!isNaN(idx) && typeof v === "number") scores[idx] = Math.max(-1, Math.min(1, v));
+          }
+          if (Object.keys(scores).length > 0) return scores;
         }
+      } else {
+        console.error("Gemini sentiment failed:", res.status);
       }
+    } catch (e) {
+      console.error("Gemini sentiment error:", e);
     }
-  } catch (e) {
-    console.error("AI sentiment batch error:", e);
+  }
+
+  // Fallback to Lovable AI
+  if (lovableKey) {
+    try {
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (content) {
+          const parsed = JSON.parse(content);
+          for (const [k, v] of Object.entries(parsed)) {
+            const idx = parseInt(k, 10) - 1;
+            if (!isNaN(idx) && typeof v === "number") scores[idx] = Math.max(-1, Math.min(1, v));
+          }
+        }
+      } else {
+        console.error("Lovable sentiment fallback failed:", res.status);
+      }
+    } catch (e) {
+      console.error("Lovable sentiment error:", e);
+    }
   }
 
   return scores;
@@ -73,7 +105,8 @@ serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Sentiment Analyst");
 
@@ -161,15 +194,15 @@ serve(async (req) => {
     // ═══════════════════════════════════════════════════════
     // PHASE 2: AI-powered sentiment scoring via the swarm
     // ═══════════════════════════════════════════════════════
-    let useAI = !!GEMINI_API_KEY;
+    let useAI = !!(GEMINI_API_KEY || LOVABLE_API_KEY);
     let aiScores: Record<number, number> = {};
 
     if (useAI) {
       aiScores = await aiSentimentBatch(
         newsItems.map(n => ({ headline: n.headline, source: n.source })),
-        GEMINI_API_KEY!
+        GEMINI_API_KEY,
+        LOVABLE_API_KEY
       );
-      // If AI returned nothing, fall back to keyword
       if (Object.keys(aiScores).length === 0) useAI = false;
     }
 
@@ -215,7 +248,7 @@ serve(async (req) => {
     if (articlesToInsert.length > 0) {
       const { error: insertErr } = await supabase
         .from("news_articles")
-        .upsert(articlesToInsert, { onConflict: "external_id", ignoreDuplicates: true });
+        .upsert(articlesToInsert, { onConflict: "source,external_id", ignoreDuplicates: true });
       if (insertErr) console.error("news_articles upsert error:", insertErr.message);
     }
 
@@ -246,18 +279,7 @@ serve(async (req) => {
       await supabase.from("signals").insert(sentimentSignals);
     }
 
-    // Log analytics
-    await supabase.from("live_api_streams").insert({
-      source: "SentimentAnalyst",
-      symbol_or_context: "SENTIMENT_SCAN",
-      payload: {
-        overall_score: overallScore,
-        signals_generated: sentimentSignals.length,
-        news_analyzed: newsItems.length,
-        scoring_method: useAI ? "ai-swarm" : "keyword-fallback",
-        ai_scores_returned: Object.keys(aiScores).length,
-      },
-    });
+    // Removed live_api_streams insert to reduce DB egress (kept in agent_logs only)
 
     const scoringLabel = useAI ? "AI Swarm" : "Keyword Fallback";
     await supabase.from("agent_logs").insert({
