@@ -215,7 +215,7 @@ serve(async (req) => {
     if (articlesToInsert.length > 0) {
       const { error: insertErr } = await supabase
         .from("news_articles")
-        .upsert(articlesToInsert, { onConflict: "external_id", ignoreDuplicates: true });
+        .upsert(articlesToInsert, { onConflict: "source,external_id", ignoreDuplicates: true });
       if (insertErr) console.error("news_articles upsert error:", insertErr.message);
     }
 
