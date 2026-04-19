@@ -93,6 +93,9 @@ const Index = () => {
           </div>
           <div className="text-center md:text-right text-white/20 text-[9px] uppercase tracking-widest leading-loose max-w-sm">
             Paper Trading Active — Proprietary Infrastructure — Non-Custodial Intelligence — Alpha Build
+            <div className="mt-3 text-white/30 text-[10px] tracking-[0.3em] normal-case font-mono">
+              Built with data from <span className="text-white/60">Zerve AI</span>
+            </div>
           </div>
         </div>
       </footer>
