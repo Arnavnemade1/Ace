@@ -160,19 +160,7 @@ Respond ONLY with a JSON object with this exact structure:
 
     const userPrompt = `Current positions:\n${positionsSummary}\n\nAccount:\n${accountSummary}\n\nRecent trade count: ${allTrades?.length || 0}\n\nAnalyze and suggest rebalancing.`;
 
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
-      }),
-    });
-
-    if (!aiResponse.ok) throw new Error(`Gemini API error: ${aiResponse.status}`);
-
-    const aiData = await aiResponse.json();
-    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
     let optResult = { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] } as any;
 
     try {
