@@ -279,18 +279,7 @@ serve(async (req) => {
       await supabase.from("signals").insert(sentimentSignals);
     }
 
-    // Log analytics
-    await supabase.from("live_api_streams").insert({
-      source: "SentimentAnalyst",
-      symbol_or_context: "SENTIMENT_SCAN",
-      payload: {
-        overall_score: overallScore,
-        signals_generated: sentimentSignals.length,
-        news_analyzed: newsItems.length,
-        scoring_method: useAI ? "ai-swarm" : "keyword-fallback",
-        ai_scores_returned: Object.keys(aiScores).length,
-      },
-    });
+    // Removed live_api_streams insert to reduce DB egress (kept in agent_logs only)
 
     const scoringLabel = useAI ? "AI Swarm" : "Keyword Fallback";
     await supabase.from("agent_logs").insert({
