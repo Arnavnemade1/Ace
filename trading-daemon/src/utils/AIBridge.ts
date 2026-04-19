@@ -5,6 +5,7 @@ export interface AIRequestOptions {
     temperature?: number;
     maxTokens?: number;
     responseMimeType?: string;
+    model?: string; // Optional override for higher-tier reasoning (e.g. 'gemini-2.5-pro')
 }
 
 export type AIResponse = {
@@ -70,8 +71,11 @@ export class AIBridge {
         }
         messages.push({ role: 'user', content: userPrompt });
 
+        const lovableModel = options.model
+            ? (options.model.startsWith('google/') ? options.model : `google/${options.model}`)
+            : 'google/gemini-2.5-flash';
         const body: any = {
-            model: 'google/gemini-2.5-flash',
+            model: lovableModel,
             messages,
             temperature: options.temperature ?? 0.7,
             max_tokens: options.maxTokens ?? 2048,
@@ -93,14 +97,18 @@ export class AIBridge {
         const text = response.data?.choices?.[0]?.message?.content;
         if (!text) throw new Error('Empty response from Lovable AI');
 
-        return { text, modelUsed: 'lovable/gemini-2.5-flash', success: true };
+        return { text, modelUsed: `lovable/${lovableModel}`, success: true };
     }
 
     // ── Gemini Direct API with model cascade ──
     private async callGeminiStack(userPrompt: string, options: AIRequestOptions): Promise<AIResponse> {
         let lastError = '';
+        // If caller specified a preferred model, try it first then fall back through the stack.
+        const stack = options.model
+            ? [options.model, ...GEMINI_MODELS.filter(m => m !== options.model)]
+            : GEMINI_MODELS;
 
-        for (const model of GEMINI_MODELS) {
+        for (const model of stack) {
             try {
                 return await this.callGeminiDirect(model, userPrompt, options);
             } catch (error: any) {
