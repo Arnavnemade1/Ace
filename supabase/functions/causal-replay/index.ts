@@ -108,19 +108,7 @@ Respond ONLY with a JSON object with this exact structure:
 
     const userPrompt = `Replay these trades:\n${tradesSummary}\n\nRelated signals: ${JSON.stringify(relatedSignals?.slice(0, 10))}`;
 
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
-      }),
-    });
-
-    if (!aiResponse.ok) throw new Error(`Gemini API error: ${aiResponse.status}`);
-
-    const aiData = await aiResponse.json();
-    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
     let replayResult = { trade_analyses: [], patterns_identified: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0 } as any;
 
     try {
