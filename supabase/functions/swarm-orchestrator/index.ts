@@ -10,10 +10,9 @@ const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
 const ALPACA_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA = "https://data.alpaca.markets";
-const GEMINI_DIRECT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"];
 
-// AI Gateway with Gemini fallback to minimize costs
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay = 2000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1500): Promise<T> {
   let delay = initialDelay;
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -21,9 +20,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay =
     } catch (error: any) {
       const isRateLimit = error.message?.includes("429") || error.message?.toLowerCase().includes("rate limit");
       if (isRateLimit && i < maxRetries - 1) {
-        console.log(`[Retry] 429/Rate Limit hit. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+        console.log(`[Retry] Rate limit hit. Retrying in ${delay}ms (${i + 1}/${maxRetries})`);
         await new Promise(r => setTimeout(r, delay));
-        delay *= 2; // Exponential backoff
+        delay *= 2;
         continue;
       }
       throw error;
@@ -32,16 +31,54 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay =
   return await fn();
 }
 
+// AI cascade: Gemini direct (model fallback stack) → Lovable AI gateway
 async function callAI(lovableKey: string, geminiKey: string, messages: any[], jsonMode = true): Promise<string> {
-  // Try Lovable AI first (with retry)
+  const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
+  const userMsg = messages.find((m: any) => m.role === "user")?.content || "";
+  const combinedPrompt = `${systemMsg}\n\n${userMsg}`;
+
+  // Try Gemini direct with model cascade
+  if (geminiKey) {
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: combinedPrompt }] }],
+            generationConfig: {
+              ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+              temperature: 0.7,
+              maxOutputTokens: 2048,
+            },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return text;
+        } else if (res.status === 429 || res.status >= 500) {
+          console.log(`Gemini ${model} ${res.status}, trying next model`);
+          continue;
+        } else {
+          console.log(`Gemini ${model} ${res.status}, falling back to Lovable`);
+          break;
+        }
+      } catch (e) {
+        console.log(`Gemini ${model} error:`, (e as Error).message);
+      }
+    }
+  }
+
+  // Fallback: Lovable AI gateway
   if (lovableKey) {
     try {
-      const content = await withRetry(async () => {
+      return await withRetry(async () => {
         const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
           method: "POST",
           headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "google/gemini-3-flash-preview",
+            model: "google/gemini-2.5-flash-lite",
             messages,
             ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
           }),
@@ -51,37 +88,13 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
         const content = data.choices?.[0]?.message?.content;
         if (!content) throw new Error("Empty content from Lovable");
         return content;
-      }, 3, 1000); // 3 retries for Lovable
-
-      if (content) return content;
+      }, 2, 1500);
     } catch (e) {
-      console.log("Lovable AI failed after retries, falling back to Gemini direct:", (e as Error).message);
+      console.error("Lovable AI also failed:", (e as Error).message);
     }
   }
 
-  // Fallback to Gemini direct API
-  if (!geminiKey) throw new Error("No AI keys available (both Lovable and Gemini missing)");
-
-  const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
-  const userMsg = messages.find((m: any) => m.role === "user")?.content || "";
-
-  return await withRetry(async () => {
-    const geminiRes = await fetch(`${GEMINI_DIRECT_URL}?key=${geminiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `${systemMsg}\n\n${userMsg}` }] }],
-        generationConfig: {
-          ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-        },
-      }),
-    });
-    if (!geminiRes.ok) throw new Error(`Gemini API error: ${geminiRes.status}`);
-    const geminiData = await geminiRes.json();
-    return geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  });
+  throw new Error("All AI providers failed (Gemini cascade + Lovable AI)");
 }
 
 // ── WIDE UNIVERSE: 80+ diverse stocks across sectors ──
