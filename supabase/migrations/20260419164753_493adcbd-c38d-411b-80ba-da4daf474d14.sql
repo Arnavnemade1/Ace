@@ -1,0 +1,1 @@
+DELETE FROM public.live_api_streams WHERE created_at < now() - interval '1 day';
