@@ -15,9 +15,7 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
-    if (!GEMINI_API_KEY && !LOVABLE_API_KEY) throw new Error("No AI keys configured");
+    // AI keys are read inside callAI
 
     await supabase.from("agent_state").update({ status: "learning", updated_at: new Date().toISOString() }).eq("agent_name", "Causal Replay");
 
