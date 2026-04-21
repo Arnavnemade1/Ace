@@ -10,7 +10,7 @@ const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
 const ALPACA_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA = "https://data.alpaca.markets";
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"];
+const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1500): Promise<T> {
   let delay = initialDelay;
@@ -49,7 +49,7 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
             generationConfig: {
               ...(jsonMode ? { responseMimeType: "application/json" } : {}),
               temperature: 0.7,
-              maxOutputTokens: 2048,
+              maxOutputTokens: 1024,
             },
           }),
         });
@@ -80,6 +80,8 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
           body: JSON.stringify({
             model: "google/gemini-2.5-flash-lite",
             messages,
+            max_tokens: 1024,
+            temperature: 0.4,
             ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
           }),
         });
@@ -90,11 +92,40 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
         return content;
       }, 2, 1500);
     } catch (e) {
-      console.error("Lovable AI also failed:", (e as Error).message);
+      console.error("Lovable AI failed, trying OpenRouter Llama:", (e as Error).message);
     }
   }
 
-  throw new Error("All AI providers failed (Gemini cascade + Lovable AI)");
+  // 3rd fallback: OpenRouter Llama 3.3 70B free
+  const openrouterKey = Deno.env.get("OPENROUTER_API_KEY") || "";
+  if (openrouterKey) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${openrouterKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "meta-llama/llama-3.3-70b-instruct:free",
+          messages: jsonMode
+            ? [{ role: "system", content: "Respond with ONLY valid JSON, no prose, no markdown fences." }, ...messages]
+            : messages,
+          max_tokens: 1024,
+          temperature: 0.4,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        let content = data.choices?.[0]?.message?.content || "";
+        if (jsonMode) content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+        if (content) return content;
+      } else {
+        console.error("OpenRouter Llama error:", res.status);
+      }
+    } catch (e) {
+      console.error("OpenRouter Llama exception:", (e as Error).message);
+    }
+  }
+
+  throw new Error("All AI providers failed (Gemini → Lovable → OpenRouter)");
 }
 
 // ── WIDE UNIVERSE: 80+ diverse stocks across sectors ──

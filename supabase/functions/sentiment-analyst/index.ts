@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callAI, safeJSON } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,7 +9,6 @@ const corsHeaders = {
 
 const FALLBACK_WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "QQQ", "XLE", "USO", "MSFT", "AMZN", "META"];
 
-// Keyword-based fast scoring as a FALLBACK
 const BULLISH_WORDS = new Set(["surge", "soar", "rally", "beat", "record", "upgrade", "growth", "profit", "boom", "strong", "gain", "rise", "jumps", "bullish", "outperform", "breakthrough", "buy", "positive", "optimistic", "expansion"]);
 const BEARISH_WORDS = new Set(["crash", "plunge", "drop", "miss", "downgrade", "loss", "decline", "fall", "weak", "bearish", "selloff", "recession", "layoff", "warning", "cut", "negative", "risk", "fear", "concern", "investigation", "lawsuit", "war", "conflict"]);
 
@@ -22,79 +22,26 @@ function keywordScore(text: string): number {
   return Math.max(-1, Math.min(1, score));
 }
 
-// AI-powered batch sentiment analysis: Gemini primary → Lovable AI fallback
-async function aiSentimentBatch(
-  headlines: { headline: string; source: string }[],
-  geminiKey: string,
-  lovableKey: string
-): Promise<Record<number, number>> {
+// Batch-score headlines with shared AI (Gemini→Lovable→Llama). Aggressively token-capped.
+async function aiSentimentBatch(headlines: { headline: string; source: string }[]): Promise<Record<number, number>> {
   const scores: Record<number, number> = {};
   if (!headlines.length) return scores;
 
-  const batch = headlines.slice(0, 25);
-  const numberedList = batch.map((h, i) => `${i + 1}. [${h.source}] ${h.headline}`).join("\n");
-  const prompt = `You are a financial sentiment engine. Score each headline from -1.0 (extremely bearish) to +1.0 (extremely bullish). Respond ONLY with a JSON object mapping headline number to score. Example: {"1": 0.7, "2": -0.3}\n\nHeadlines:\n${numberedList}`;
+  // Cap to 20 headlines per call, truncate each to 120 chars to save tokens
+  const batch = headlines.slice(0, 20);
+  const numberedList = batch.map((h, i) => `${i + 1}. ${h.headline.slice(0, 120)}`).join("\n");
+  const prompt = `Score each headline -1 (bearish) to +1 (bullish). JSON only: {"1":0.7,"2":-0.3,...}\n${numberedList}`;
 
-  // Try Gemini first
-  if (geminiKey) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 1024 },
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (content) {
-          const parsed = typeof content === "string" ? JSON.parse(content) : content;
-          for (const [k, v] of Object.entries(parsed)) {
-            const idx = parseInt(k, 10) - 1;
-            if (!isNaN(idx) && typeof v === "number") scores[idx] = Math.max(-1, Math.min(1, v));
-          }
-          if (Object.keys(scores).length > 0) return scores;
-        }
-      } else {
-        console.error("Gemini sentiment failed:", res.status);
-      }
-    } catch (e) {
-      console.error("Gemini sentiment error:", e);
+  try {
+    const raw = await callAI(prompt, { maxTokens: 400, temperature: 0.1 });
+    const parsed = safeJSON<Record<string, number>>(raw, {});
+    for (const [k, v] of Object.entries(parsed)) {
+      const idx = parseInt(k, 10) - 1;
+      if (!isNaN(idx) && typeof v === "number") scores[idx] = Math.max(-1, Math.min(1, v));
     }
+  } catch (e) {
+    console.error("aiSentimentBatch failed:", (e as Error).message);
   }
-
-  // Fallback to Lovable AI
-  if (lovableKey) {
-    try {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-lite",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const content = data.choices?.[0]?.message?.content;
-        if (content) {
-          const parsed = JSON.parse(content);
-          for (const [k, v] of Object.entries(parsed)) {
-            const idx = parseInt(k, 10) - 1;
-            if (!isNaN(idx) && typeof v === "number") scores[idx] = Math.max(-1, Math.min(1, v));
-          }
-        }
-      } else {
-        console.error("Lovable sentiment fallback failed:", res.status);
-      }
-    } catch (e) {
-      console.error("Lovable sentiment error:", e);
-    }
-  }
-
   return scores;
 }
 
@@ -194,14 +141,12 @@ serve(async (req) => {
     // ═══════════════════════════════════════════════════════
     // PHASE 2: AI-powered sentiment scoring via the swarm
     // ═══════════════════════════════════════════════════════
-    let useAI = !!(GEMINI_API_KEY || LOVABLE_API_KEY);
+    let useAI = !!(Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENROUTER_API_KEY"));
     let aiScores: Record<number, number> = {};
 
     if (useAI) {
       aiScores = await aiSentimentBatch(
-        newsItems.map(n => ({ headline: n.headline, source: n.source })),
-        GEMINI_API_KEY,
-        LOVABLE_API_KEY
+        newsItems.map(n => ({ headline: n.headline, source: n.source }))
       );
       if (Object.keys(aiScores).length === 0) useAI = false;
     }

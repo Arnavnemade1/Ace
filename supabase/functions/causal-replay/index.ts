@@ -1,50 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callAI, safeJSON } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-// AI helper: Gemini primary → Lovable AI fallback (JSON mode)
-async function callAIJson(prompt: string, geminiKey: string, lovableKey: string, maxTokens = 2048): Promise<string> {
-  if (geminiKey) {
-    try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", maxOutputTokens: maxTokens },
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (t) return t;
-      } else {
-        console.log(`Gemini ${r.status}, falling back to Lovable AI`);
-      }
-    } catch (e) {
-      console.log("Gemini error, falling back:", (e as Error).message);
-    }
-  }
-  if (lovableKey) {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
-    });
-    if (!r.ok) throw new Error(`Lovable AI fallback failed: ${r.status}`);
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "{}";
-  }
-  throw new Error("No AI keys available");
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -54,9 +15,7 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
-    if (!GEMINI_API_KEY && !LOVABLE_API_KEY) throw new Error("No AI keys configured");
+    // AI keys are read inside callAI
 
     await supabase.from("agent_state").update({ status: "learning", updated_at: new Date().toISOString() }).eq("agent_name", "Causal Replay");
 
@@ -74,46 +33,21 @@ serve(async (req) => {
       });
     }
 
-    // Fetch signals that led to these trades
-    const { data: relatedSignals } = await supabase
-      .from("signals")
-      .select("*")
-      .eq("acted_on", true)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    const tradesSummary = recentTrades.map((t) =>
-      `${t.side} ${t.qty} ${t.symbol} @ $${t.price} | Strategy: ${t.strategy} | P&L: ${t.pnl !== null ? `$${t.pnl}` : "open"} | Reasoning: ${t.reasoning}`
+    const tradesToAnalyze = recentTrades.slice(0, 8);
+    const tradesSummary = tradesToAnalyze.map((t) =>
+      `${t.id.slice(0,8)} ${t.side} ${t.qty}${t.symbol}@${t.price} pnl=${t.pnl ?? "open"}`
     ).join("\n");
 
-    // AI counterfactual analysis via Gemini direct
-    const systemPrompt = `You are the Causal Replay agent. You perform nightly counterfactual analysis on the day's trades. For each trade, ask:
-- What if we had waited 30 minutes?
-- What if we had sized 50% larger or smaller?
-- What if we had used a different signal threshold?
-- What if we had set a tighter/wider stop loss?
+    const prompt = `Analyze trades. Return JSON: {"trade_analyses":[{"trade_id":"id","counterfactuals":[{"scenario":"s","estimated_outcome":"o","would_have_been_better":bool}]}],"patterns_to_prune":["p"],"improvement_suggestions":["s"],"overall_improvement_score":0-100}\n\nTrades:\n${tradesSummary}`;
 
-Identify patterns: which strategies consistently underperform? Which signal types lead to the best trades? What timing patterns emerge?
-
-Provide concrete, actionable improvement suggestions.
-
-Respond ONLY with a JSON object with this exact structure:
-{
-  "trade_analyses": [{"trade_id": "string", "counterfactuals": [{"scenario": "string", "estimated_outcome": "string", "would_have_been_better": true/false}]}],
-  "patterns_identified": ["string"],
-  "patterns_to_prune": ["string"],
-  "improvement_suggestions": ["string"],
-  "overall_improvement_score": 0-100
-}`;
-
-    const userPrompt = `Replay these trades:\n${tradesSummary}\n\nRelated signals: ${JSON.stringify(relatedSignals?.slice(0, 10))}`;
-
-    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
-    let replayResult = { trade_analyses: [], patterns_identified: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0 } as any;
-
-    try {
-      replayResult = JSON.parse(rawText);
-    } catch { /* use defaults */ }
+    const rawText = await callAI(prompt, { maxTokens: 800, temperature: 0.2 });
+    const replayResult = safeJSON<any>(rawText, {
+      trade_analyses: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0,
+    });
+    replayResult.trade_analyses ??= [];
+    replayResult.patterns_to_prune ??= [];
+    replayResult.improvement_suggestions ??= [];
+    replayResult.overall_improvement_score ??= 0;
     // Store replay results
     for (const analysis of replayResult.trade_analyses) {
       await supabase.from("replay_results").insert({

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callAI, safeJSON } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,46 +8,6 @@ const corsHeaders = {
 };
 const MIN_POSITIONS_FOR_OPTIMIZATION = 2;
 const CASH_BUFFER_PCT = 0.25;
-
-// AI helper: Gemini primary → Lovable AI fallback
-async function callAIJson(prompt: string, geminiKey: string, lovableKey: string, maxTokens = 2048): Promise<string> {
-  if (geminiKey) {
-    try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", maxOutputTokens: maxTokens },
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (t) return t;
-      } else {
-        console.log(`Gemini ${r.status}, falling back to Lovable AI`);
-      }
-    } catch (e) {
-      console.log("Gemini error, falling back:", (e as Error).message);
-    }
-  }
-  if (lovableKey) {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
-    });
-    if (!r.ok) throw new Error(`Lovable AI fallback failed: ${r.status}`);
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "{}";
-  }
-  throw new Error("No AI keys available");
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -58,9 +19,7 @@ serve(async (req) => {
     );
     const ALPACA_API_KEY = Deno.env.get("ALPACA_API_KEY");
     const ALPACA_API_SECRET = Deno.env.get("ALPACA_API_SECRET");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
-    if (!GEMINI_API_KEY && !LOVABLE_API_KEY) throw new Error("No AI keys configured");
+    // AI keys read inside callAI
 
     await supabase.from("agent_state").update({ status: "active", updated_at: new Date().toISOString() }).eq("agent_name", "Portfolio Optimizer");
 
@@ -138,34 +97,13 @@ serve(async (req) => {
       ? `Equity: $${account.equity}, Cash: $${account.cash}, Buying Power: $${account.buying_power}`
       : "No account data";
 
-    // AI optimization via Gemini direct
-    const systemPrompt = `You are the Portfolio Optimizer agent. You continuously rebalance using Markowitz-enhanced allocation principles:
+    const prompt = `Optimize portfolio (Markowitz, max Sharpe). Return JSON: {"sharpe_ratio":n,"sortino_ratio":n,"max_drawdown":n,"current_allocations":[{"symbol":"s","current_weight":n,"optimal_weight":n}],"rebalance_trades":[{"symbol":"s","side":"BUY|SELL","qty":n,"reasoning":"r"}]}\n\nPositions:\n${positionsSummary}\n\n${accountSummary}\nTrade count: ${allTrades?.length || 0}`;
 
-1. Calculate current allocation weights
-2. Estimate expected returns and covariances
-3. Optimize for maximum Sharpe ratio
-4. Suggest rebalancing trades to move toward optimal allocation
-5. Consider transaction costs and tax implications
-
-Also calculate portfolio metrics: Sharpe ratio, Sortino ratio, max drawdown.
-
-Respond ONLY with a JSON object with this exact structure:
-{
-  "sharpe_ratio": number,
-  "sortino_ratio": number,
-  "max_drawdown": number,
-  "current_allocations": [{"symbol": "string", "current_weight": number, "optimal_weight": number}],
-  "rebalance_trades": [{"symbol": "string", "side": "BUY" or "SELL", "qty": number, "reasoning": "string"}]
-}`;
-
-    const userPrompt = `Current positions:\n${positionsSummary}\n\nAccount:\n${accountSummary}\n\nRecent trade count: ${allTrades?.length || 0}\n\nAnalyze and suggest rebalancing.`;
-
-    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
-    let optResult = { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] } as any;
-
-    try {
-      optResult = JSON.parse(rawText);
-    } catch { /* use defaults */ }
+    const rawText = await callAI(prompt, { maxTokens: 700, temperature: 0.2 });
+    const optResult = safeJSON<any>(rawText, { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] });
+    optResult.sharpe_ratio ??= 0;
+    optResult.rebalance_trades ??= [];
+    optResult.current_allocations ??= [];
 
     // Submit rebalance trades as pending
     for (const trade of optResult.rebalance_trades) {
