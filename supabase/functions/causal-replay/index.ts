@@ -33,46 +33,21 @@ serve(async (req) => {
       });
     }
 
-    // Fetch signals that led to these trades
-    const { data: relatedSignals } = await supabase
-      .from("signals")
-      .select("*")
-      .eq("acted_on", true)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    const tradesSummary = recentTrades.map((t) =>
-      `${t.side} ${t.qty} ${t.symbol} @ $${t.price} | Strategy: ${t.strategy} | P&L: ${t.pnl !== null ? `$${t.pnl}` : "open"} | Reasoning: ${t.reasoning}`
+    const tradesToAnalyze = recentTrades.slice(0, 8);
+    const tradesSummary = tradesToAnalyze.map((t) =>
+      `${t.id.slice(0,8)} ${t.side} ${t.qty}${t.symbol}@${t.price} pnl=${t.pnl ?? "open"}`
     ).join("\n");
 
-    // AI counterfactual analysis via Gemini direct
-    const systemPrompt = `You are the Causal Replay agent. You perform nightly counterfactual analysis on the day's trades. For each trade, ask:
-- What if we had waited 30 minutes?
-- What if we had sized 50% larger or smaller?
-- What if we had used a different signal threshold?
-- What if we had set a tighter/wider stop loss?
+    const prompt = `Analyze trades. Return JSON: {"trade_analyses":[{"trade_id":"id","counterfactuals":[{"scenario":"s","estimated_outcome":"o","would_have_been_better":bool}]}],"patterns_to_prune":["p"],"improvement_suggestions":["s"],"overall_improvement_score":0-100}\n\nTrades:\n${tradesSummary}`;
 
-Identify patterns: which strategies consistently underperform? Which signal types lead to the best trades? What timing patterns emerge?
-
-Provide concrete, actionable improvement suggestions.
-
-Respond ONLY with a JSON object with this exact structure:
-{
-  "trade_analyses": [{"trade_id": "string", "counterfactuals": [{"scenario": "string", "estimated_outcome": "string", "would_have_been_better": true/false}]}],
-  "patterns_identified": ["string"],
-  "patterns_to_prune": ["string"],
-  "improvement_suggestions": ["string"],
-  "overall_improvement_score": 0-100
-}`;
-
-    const userPrompt = `Replay these trades:\n${tradesSummary}\n\nRelated signals: ${JSON.stringify(relatedSignals?.slice(0, 10))}`;
-
-    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
-    let replayResult = { trade_analyses: [], patterns_identified: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0 } as any;
-
-    try {
-      replayResult = JSON.parse(rawText);
-    } catch { /* use defaults */ }
+    const rawText = await callAI(prompt, { maxTokens: 800, temperature: 0.2 });
+    const replayResult = safeJSON<any>(rawText, {
+      trade_analyses: [], patterns_to_prune: [], improvement_suggestions: [], overall_improvement_score: 0,
+    });
+    replayResult.trade_analyses ??= [];
+    replayResult.patterns_to_prune ??= [];
+    replayResult.improvement_suggestions ??= [];
+    replayResult.overall_improvement_score ??= 0;
     // Store replay results
     for (const analysis of replayResult.trade_analyses) {
       await supabase.from("replay_results").insert({

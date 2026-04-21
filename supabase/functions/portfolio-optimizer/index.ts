@@ -97,34 +97,13 @@ serve(async (req) => {
       ? `Equity: $${account.equity}, Cash: $${account.cash}, Buying Power: $${account.buying_power}`
       : "No account data";
 
-    // AI optimization via Gemini direct
-    const systemPrompt = `You are the Portfolio Optimizer agent. You continuously rebalance using Markowitz-enhanced allocation principles:
+    const prompt = `Optimize portfolio (Markowitz, max Sharpe). Return JSON: {"sharpe_ratio":n,"sortino_ratio":n,"max_drawdown":n,"current_allocations":[{"symbol":"s","current_weight":n,"optimal_weight":n}],"rebalance_trades":[{"symbol":"s","side":"BUY|SELL","qty":n,"reasoning":"r"}]}\n\nPositions:\n${positionsSummary}\n\n${accountSummary}\nTrade count: ${allTrades?.length || 0}`;
 
-1. Calculate current allocation weights
-2. Estimate expected returns and covariances
-3. Optimize for maximum Sharpe ratio
-4. Suggest rebalancing trades to move toward optimal allocation
-5. Consider transaction costs and tax implications
-
-Also calculate portfolio metrics: Sharpe ratio, Sortino ratio, max drawdown.
-
-Respond ONLY with a JSON object with this exact structure:
-{
-  "sharpe_ratio": number,
-  "sortino_ratio": number,
-  "max_drawdown": number,
-  "current_allocations": [{"symbol": "string", "current_weight": number, "optimal_weight": number}],
-  "rebalance_trades": [{"symbol": "string", "side": "BUY" or "SELL", "qty": number, "reasoning": "string"}]
-}`;
-
-    const userPrompt = `Current positions:\n${positionsSummary}\n\nAccount:\n${accountSummary}\n\nRecent trade count: ${allTrades?.length || 0}\n\nAnalyze and suggest rebalancing.`;
-
-    const rawText = await callAIJson(`${systemPrompt}\n\n${userPrompt}`, GEMINI_API_KEY, LOVABLE_API_KEY, 2048);
-    let optResult = { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] } as any;
-
-    try {
-      optResult = JSON.parse(rawText);
-    } catch { /* use defaults */ }
+    const rawText = await callAI(prompt, { maxTokens: 700, temperature: 0.2 });
+    const optResult = safeJSON<any>(rawText, { sharpe_ratio: 0, current_allocations: [], rebalance_trades: [] });
+    optResult.sharpe_ratio ??= 0;
+    optResult.rebalance_trades ??= [];
+    optResult.current_allocations ??= [];
 
     // Submit rebalance trades as pending
     for (const trade of optResult.rebalance_trades) {
