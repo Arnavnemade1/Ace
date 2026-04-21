@@ -1,50 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callAI, safeJSON } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-// AI helper: Gemini primary → Lovable AI fallback (JSON mode)
-async function callAIJson(prompt: string, geminiKey: string, lovableKey: string, maxTokens = 2048): Promise<string> {
-  if (geminiKey) {
-    try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", maxOutputTokens: maxTokens },
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (t) return t;
-      } else {
-        console.log(`Gemini ${r.status}, falling back to Lovable AI`);
-      }
-    } catch (e) {
-      console.log("Gemini error, falling back:", (e as Error).message);
-    }
-  }
-  if (lovableKey) {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
-    });
-    if (!r.ok) throw new Error(`Lovable AI fallback failed: ${r.status}`);
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "{}";
-  }
-  throw new Error("No AI keys available");
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
