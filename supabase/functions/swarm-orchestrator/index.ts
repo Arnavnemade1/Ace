@@ -10,7 +10,7 @@ const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
 const ALPACA_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA = "https://data.alpaca.markets";
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"];
+const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1500): Promise<T> {
   let delay = initialDelay;
