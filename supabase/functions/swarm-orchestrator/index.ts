@@ -635,16 +635,27 @@ Execute strategy.`
       ],
     };
 
-    const aiContent = await callAI(LOVABLE_API_KEY, GEMINI_API_KEY, brainPrompt.messages, true);
-    if (!aiContent) throw new Error("Empty AI response");
-
-    let brain: any;
+    let aiContent = "";
+    let brain: any = { trades: [], market_outlook: "AI unavailable — cycle skipped", portfolio_health: "N/A", thesis: "Providers cooled down, holding." };
     try {
-      brain = JSON.parse(aiContent);
-    } catch {
-      // Try extracting JSON from markdown
-      const match = aiContent.match(/\{[\s\S]*\}/);
-      brain = match ? JSON.parse(match[0]) : { trades: [], market_outlook: "Parse failed", portfolio_health: "Unknown", loss_lessons: "N/A" };
+      aiContent = await callAI(LOVABLE_API_KEY, GEMINI_API_KEY, brainPrompt.messages, true);
+    } catch (e) {
+      console.warn("[Cycle] AI unavailable, skipping trade generation:", (e as Error).message);
+      await supabase.from("agent_logs").insert({
+        agent_name: "Swarm Orchestrator", log_type: "warning",
+        message: "AI providers cooled down — cycle skipped (no trades). Will retry next cycle.",
+      });
+      return new Response(JSON.stringify({ success: true, skipped: true, reason: "ai_cooldown" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (aiContent) {
+      try { brain = JSON.parse(aiContent); }
+      catch {
+        const match = aiContent.match(/\{[\s\S]*\}/);
+        if (match) { try { brain = JSON.parse(match[0]); } catch { /* keep default */ } }
+      }
     }
 
     const trades = Array.isArray(brain.trades) ? brain.trades : (brain.action ? [brain] : []);
