@@ -141,14 +141,12 @@ serve(async (req) => {
     // ═══════════════════════════════════════════════════════
     // PHASE 2: AI-powered sentiment scoring via the swarm
     // ═══════════════════════════════════════════════════════
-    let useAI = !!(GEMINI_API_KEY || LOVABLE_API_KEY);
+    let useAI = !!(Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENROUTER_API_KEY"));
     let aiScores: Record<number, number> = {};
 
     if (useAI) {
       aiScores = await aiSentimentBatch(
-        newsItems.map(n => ({ headline: n.headline, source: n.source })),
-        GEMINI_API_KEY,
-        LOVABLE_API_KEY
+        newsItems.map(n => ({ headline: n.headline, source: n.source }))
       );
       if (Object.keys(aiScores).length === 0) useAI = false;
     }
