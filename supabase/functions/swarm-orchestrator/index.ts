@@ -10,35 +10,43 @@ const GET_SECRET = (key: string) => Deno.env.get(key) || "";
 const NY_TZ = "America/New_York";
 const ALPACA_URL = "https://paper-api.alpaca.markets";
 const ALPACA_DATA = "https://data.alpaca.markets";
-const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
+const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]; // cheapest only
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1500): Promise<T> {
-  let delay = initialDelay;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      const isRateLimit = error.message?.includes("429") || error.message?.toLowerCase().includes("rate limit");
-      if (isRateLimit && i < maxRetries - 1) {
-        console.log(`[Retry] Rate limit hit. Retrying in ${delay}ms (${i + 1}/${maxRetries})`);
-        await new Promise(r => setTimeout(r, delay));
-        delay *= 2;
-        continue;
-      }
-      throw error;
-    }
-  }
-  return await fn();
-}
+// ─── PROVIDER COOLDOWNS (in-memory, persists across warm invocations) ───
+// When a provider returns 429/402, mark it dead for COOLDOWN_MS so we stop hammering it.
+const COOLDOWN_MS = 5 * 60 * 1000; // 5 min
+const providerCooldown: Record<string, number> = { gemini: 0, lovable: 0, openrouter: 0 };
+const isCool = (k: string) => Date.now() < providerCooldown[k];
+const cool = (k: string) => { providerCooldown[k] = Date.now() + COOLDOWN_MS; console.log(`[AI] ${k} cooled down ${COOLDOWN_MS / 1000}s`); };
 
-// AI cascade: Gemini direct (model fallback stack) → Lovable AI gateway
+// ─── RESPONSE CACHE (key = sha-ish hash of prompt) ───
+const responseCache = new Map<string, { content: string; ts: number }>();
+const CACHE_TTL_MS = 8 * 60 * 1000; // 8 min — orchestrator runs every ~60s, so we reuse for ~8 cycles
+const hashStr = (s: string): string => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+  return String(h);
+};
+
+// AI cascade: Gemini → Lovable → OpenRouter, with cooldown + cache.
+// maxTokens kept LOW (512) to save credits.
 async function callAI(lovableKey: string, geminiKey: string, messages: any[], jsonMode = true): Promise<string> {
   const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
   const userMsg = messages.find((m: any) => m.role === "user")?.content || "";
   const combinedPrompt = `${systemMsg}\n\n${userMsg}`;
 
-  // Try Gemini direct with model cascade
-  if (geminiKey) {
+  // 1. Cache check
+  const cacheKey = hashStr(combinedPrompt);
+  const cached = responseCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    console.log("[AI] cache hit");
+    return cached.content;
+  }
+
+  const MAX_TOKENS = 512;
+
+  // 2. Gemini direct
+  if (geminiKey && !isCool("gemini")) {
     for (const model of GEMINI_MODELS) {
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
@@ -48,57 +56,60 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
             contents: [{ parts: [{ text: combinedPrompt }] }],
             generationConfig: {
               ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-              temperature: 0.7,
-              maxOutputTokens: 1024,
+              temperature: 0.3,
+              maxOutputTokens: MAX_TOKENS,
             },
           }),
         });
         if (res.ok) {
           const data = await res.json();
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) return text;
-        } else if (res.status === 429 || res.status >= 500) {
-          console.log(`Gemini ${model} ${res.status}, trying next model`);
+          if (text) {
+            responseCache.set(cacheKey, { content: text, ts: Date.now() });
+            return text;
+          }
+        } else if (res.status === 429) {
+          cool("gemini"); // entire provider dead, don't try other gemini models
+          break;
+        } else if (res.status >= 500) {
           continue;
         } else {
-          console.log(`Gemini ${model} ${res.status}, falling back to Lovable`);
           break;
         }
-      } catch (e) {
-        console.log(`Gemini ${model} error:`, (e as Error).message);
-      }
+      } catch (_e) { /* try next */ }
     }
   }
 
-  // Fallback: Lovable AI gateway
-  if (lovableKey) {
+  // 3. Lovable AI gateway
+  if (lovableKey && !isCool("lovable")) {
     try {
-      return await withRetry(async () => {
-        const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
-            messages,
-            max_tokens: 1024,
-            temperature: 0.4,
-            ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-          }),
-        });
-        if (!res.ok) throw new Error(`Lovable API error: ${res.status}`);
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages,
+          max_tokens: MAX_TOKENS,
+          temperature: 0.3,
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+        }),
+      });
+      if (res.ok) {
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content;
-        if (!content) throw new Error("Empty content from Lovable");
-        return content;
-      }, 2, 1500);
-    } catch (e) {
-      console.error("Lovable AI failed, trying OpenRouter Llama:", (e as Error).message);
-    }
+        if (content) {
+          responseCache.set(cacheKey, { content, ts: Date.now() });
+          return content;
+        }
+      } else if (res.status === 429 || res.status === 402) {
+        cool("lovable");
+      }
+    } catch (_e) { /* fall through */ }
   }
 
-  // 3rd fallback: OpenRouter Llama 3.3 70B free
+  // 4. OpenRouter Llama 3.3 70B free
   const openrouterKey = Deno.env.get("OPENROUTER_API_KEY") || "";
-  if (openrouterKey) {
+  if (openrouterKey && !isCool("openrouter")) {
     try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -106,26 +117,27 @@ async function callAI(lovableKey: string, geminiKey: string, messages: any[], js
         body: JSON.stringify({
           model: "meta-llama/llama-3.3-70b-instruct:free",
           messages: jsonMode
-            ? [{ role: "system", content: "Respond with ONLY valid JSON, no prose, no markdown fences." }, ...messages]
+            ? [{ role: "system", content: "Respond with ONLY valid JSON. No prose, no markdown." }, ...messages]
             : messages,
-          max_tokens: 1024,
-          temperature: 0.4,
+          max_tokens: MAX_TOKENS,
+          temperature: 0.3,
         }),
       });
       if (res.ok) {
         const data = await res.json();
         let content = data.choices?.[0]?.message?.content || "";
         if (jsonMode) content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-        if (content) return content;
-      } else {
-        console.error("OpenRouter Llama error:", res.status);
+        if (content) {
+          responseCache.set(cacheKey, { content, ts: Date.now() });
+          return content;
+        }
+      } else if (res.status === 429) {
+        cool("openrouter");
       }
-    } catch (e) {
-      console.error("OpenRouter Llama exception:", (e as Error).message);
-    }
+    } catch (_e) { /* fall through */ }
   }
 
-  throw new Error("All AI providers failed (Gemini → Lovable → OpenRouter)");
+  throw new Error("All AI providers cooled down or failed (Gemini → Lovable → OpenRouter)");
 }
 
 // ── WIDE UNIVERSE: 80+ diverse stocks across sectors ──
@@ -623,16 +635,27 @@ Execute strategy.`
       ],
     };
 
-    const aiContent = await callAI(LOVABLE_API_KEY, GEMINI_API_KEY, brainPrompt.messages, true);
-    if (!aiContent) throw new Error("Empty AI response");
-
-    let brain: any;
+    let aiContent = "";
+    let brain: any = { trades: [], market_outlook: "AI unavailable — cycle skipped", portfolio_health: "N/A", thesis: "Providers cooled down, holding." };
     try {
-      brain = JSON.parse(aiContent);
-    } catch {
-      // Try extracting JSON from markdown
-      const match = aiContent.match(/\{[\s\S]*\}/);
-      brain = match ? JSON.parse(match[0]) : { trades: [], market_outlook: "Parse failed", portfolio_health: "Unknown", loss_lessons: "N/A" };
+      aiContent = await callAI(LOVABLE_API_KEY, GEMINI_API_KEY, brainPrompt.messages, true);
+    } catch (e) {
+      console.warn("[Cycle] AI unavailable, skipping trade generation:", (e as Error).message);
+      await supabase.from("agent_logs").insert({
+        agent_name: "Swarm Orchestrator", log_type: "warning",
+        message: "AI providers cooled down — cycle skipped (no trades). Will retry next cycle.",
+      });
+      return new Response(JSON.stringify({ success: true, skipped: true, reason: "ai_cooldown" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (aiContent) {
+      try { brain = JSON.parse(aiContent); }
+      catch {
+        const match = aiContent.match(/\{[\s\S]*\}/);
+        if (match) { try { brain = JSON.parse(match[0]); } catch { /* keep default */ } }
+      }
     }
 
     const trades = Array.isArray(brain.trades) ? brain.trades : (brain.action ? [brain] : []);
