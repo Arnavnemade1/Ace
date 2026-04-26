@@ -33,7 +33,6 @@ export default function Fins() {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-refresh logic: trigger sync on load if not already primed
   const triggerSurfaceSync = useCallback(async (reason: "manual" | "auto") => {
     try {
       await supabase.functions.invoke("fins-surface-sync", { body: { reason } });
@@ -45,11 +44,8 @@ export default function Fins() {
 
   useEffect(() => {
     if (autoPrimedRef.current || isLoading || !data) return;
-    
-    // Auto-refresh on mount
     autoPrimedRef.current = true;
     triggerSurfaceSync("auto");
-    
     if (data.disclosureEvents.length > 0 && !selectedEventId) {
       setSelectedEventId(data.disclosureEvents[0].id);
     }
@@ -78,13 +74,11 @@ export default function Fins() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-sans selection:bg-[#4ade80]/30 relative overflow-hidden">
-      {/* Background Glows */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.03),_transparent_50%),radial-gradient(circle_at_bottom_right,_rgba(74,222,128,0.02),_transparent_50%)]" />
       </div>
 
       <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 max-w-[1800px] mx-auto space-y-24">
-        {/* Header: Aurora Gradient & Professional Minimalist */}
         <header className="flex flex-col lg:flex-row justify-between items-end gap-12 border-b border-white/[0.03] pb-20">
           <div className="space-y-8">
             <div className="flex items-center gap-6">
@@ -95,21 +89,12 @@ export default function Fins() {
             <h1 className="text-7xl md:text-9xl font-black tracking-tight leading-[0.9] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow">
               Filing <br /> Analysis.
             </h1>
-            <p className="max-w-2xl text-lg text-white/40 font-light leading-relaxed">
-              Autonomous SEC disclosure processing. Real-time narrative fusion and policy-bounded signal extraction.
-            </p>
           </div>
-
           <div className="hidden lg:block w-96 text-right space-y-2">
             <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold italic">Surface Status</div>
             <div className="text-xs font-mono text-white/40 tracking-tight uppercase">
                 <AnimatePresence mode="wait">
-                  <motion.div
-                    key={streamIndex}
-                    initial={{ y: 10, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -10, opacity: 0 }}
-                  >
+                  <motion.div key={streamIndex} initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }}>
                     {STREAMS[streamIndex]}
                   </motion.div>
                 </AnimatePresence>
@@ -117,18 +102,7 @@ export default function Fins() {
           </div>
         </header>
 
-        {/* Central Intelligence Briefing: Full Width Cinematic Video */}
         <section className="space-y-12">
-            <div className="flex items-end justify-between border-b border-white/[0.03] pb-8">
-                <div className="space-y-2">
-                    <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase italic">// Atmospheric Briefing</div>
-                    <h2 className="text-4xl font-black tracking-tight uppercase">Cinematic Recap</h2>
-                </div>
-                <div className="text-right text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                    Live Session // <span className="text-[#4ade80]">Auto-Refreshed</span>
-                </div>
-            </div>
-            
             <div className="aspect-video w-full bg-black border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
                 <Player
                     component={FinsComposition}
@@ -152,71 +126,61 @@ export default function Fins() {
             </div>
         </section>
 
-        {/* Streamlined Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
-          {/* Watchlist */}
           <div className="lg:col-span-4 space-y-10">
             <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Watchlist</div>
-            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/5">
+            <div className="space-y-2 max-h-[800px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/5">
               {data?.companies?.map((company, i) => (
-                <div 
-                    key={company.id}
-                    onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
-                    className={`p-6 border transition-all cursor-pointer group space-y-6 ${
-                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/30 bg-white/[0.03]" : "border-white/5 bg-white/[0.01] hover:border-white/10"
-                    }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="text-3xl font-black tracking-tight uppercase text-white group-hover:text-[#4ade80] transition-colors">{company.ticker}</h3>
-                      <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest">{company.company_name}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-white tracking-tighter">{80 - i}%</div>
-                    </div>
+                <div key={company.id} onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
+                    className={`p-4 border transition-all cursor-pointer group flex justify-between items-center ${
+                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/30 bg-white/[0.03]" : "border-white/5 bg-transparent hover:border-white/10"
+                    }`}>
+                  <div>
+                    <h3 className="text-xl font-black uppercase text-white group-hover:text-[#4ade80]">{company.ticker}</h3>
+                    <p className="text-[9px] font-mono text-white/20 uppercase">{company.company_name}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-white tracking-tighter">{80 - i}%</div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Event Stream */}
           <div className="lg:col-span-8 space-y-10">
-            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Event_Stream</div>
-            <div className="space-y-8 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5">
+            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Event_Wire_Log</div>
+            <div className="space-y-1 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5 font-mono">
               {data?.disclosureEvents?.map((event) => {
                 const signal = data.fusedSignals.find(s => s.disclosure_event_id === event.id);
+                const isSnapshot = event.filing_type === "MARKET SNAPSHOT";
+                
                 return (
-                    <motion.div
-                        key={event.id}
-                        onClick={() => setSelectedEventId(event.id)}
-                        className={`p-10 border transition-all relative overflow-hidden group cursor-pointer ${
-                            selectedEventId === event.id ? "border-white/20 bg-white/[0.03]" : "border-white/5 bg-white/[0.01] hover:border-white/10"
+                    <motion.div key={event.id} onClick={() => setSelectedEventId(event.id)}
+                        className={`p-4 border transition-all relative group cursor-pointer flex flex-col gap-2 ${
+                            selectedEventId === event.id ? "bg-white/[0.05] border-white/20" : "bg-transparent border-white/[0.03] hover:bg-white/[0.02]"
                         }`}
                     >
-                        <div className="flex justify-between items-start mb-8 relative z-10">
-                            <div className="flex items-center gap-6">
-                                <span className="text-[11px] font-mono px-4 py-1.5 bg-white/5 border border-white/10 text-white tracking-[0.2em] uppercase font-bold">
+                        <div className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-4">
+                                <span className={`px-2 py-0.5 border ${isSnapshot ? "border-white/10 text-white/40" : "border-[#4ade80]/20 text-[#4ade80]"} font-bold`}>
                                     {event.filing_type}
                                 </span>
-                                <span className="text-[11px] font-mono text-white/20 uppercase tracking-widest">
-                                    {new Date(event.event_timestamp).toLocaleTimeString()}
-                                </span>
+                                <span className="text-white/20">{new Date(event.event_timestamp).toLocaleTimeString()}</span>
                             </div>
-                            <div className={`text-[11px] font-mono uppercase tracking-[0.2em] flex items-center gap-2 font-bold ${
-                                signal?.directional_sentiment === "positive" ? "text-[#4ade80]" : signal?.directional_sentiment === "negative" ? "text-[#f87171]" : "text-white/40"
-                            }`}>
-                                {signal?.directional_sentiment || "Neutral"}
+                            <div className={`font-bold ${signal?.directional_sentiment === "positive" ? "text-[#4ade80]" : signal?.directional_sentiment === "negative" ? "text-[#f87171]" : "text-white/30"}`}>
+                                {signal?.directional_sentiment?.toUpperCase() || "NEUTRAL"}
                             </div>
                         </div>
                         
-                        <div className="space-y-4 relative z-10">
-                            <h3 className="text-4xl font-black tracking-tight text-white uppercase group-hover:text-white transition-colors">
+                        <div className="flex flex-col gap-1">
+                            <h3 className={`text-sm font-bold uppercase ${selectedEventId === event.id ? "text-white" : "text-white/70"}`}>
                                 {event.ticker}: {event.title || "Intelligence Summary"}
                             </h3>
-                            <p className="text-xl text-white/40 leading-relaxed font-light max-w-5xl">
-                                {signal?.causal_summary || "Analyzing narrative shift and risk factors compared with prior period."}
-                            </p>
+                            {!isSnapshot && (
+                                <p className="text-xs text-white/40 leading-relaxed max-w-4xl italic">
+                                    {signal?.causal_summary}
+                                </p>
+                            )}
                         </div>
                     </motion.div>
                 );
