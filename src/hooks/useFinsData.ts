@@ -161,6 +161,10 @@ export function useFinsData() {
         client.from("news_articles").select("id, title, summary, source, published_at, sentiment_hint, symbols, url").order("published_at", { ascending: false }).limit(24),
       ]);
 
+      if (newsRes.error) {
+        console.error("[FINS] News fetch failed:", newsRes.error);
+      }
+
       await Promise.all([
         maybeThrow(watchlistsRes.error),
         maybeThrow(companiesRes.error),
@@ -170,7 +174,7 @@ export function useFinsData() {
         maybeThrow(evidenceRes.error),
         maybeThrow(alertsRes.error),
         maybeThrow(quotesRes.error),
-        maybeThrow(newsRes.error),
+        // We don't necessarily want to crash the whole page if news fails
       ]);
 
       return {

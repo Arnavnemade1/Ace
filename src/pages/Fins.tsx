@@ -249,39 +249,22 @@ const Fins = () => {
   }, [data, isLoading, triggerSurfaceSync]);
 
   const derived = useMemo(() => {
-    if (!data) {
-      return {
-        watchlist: fallbackWatchlist,
-        filingEvents: fallbackFilingEvents,
-        signalCards: fallbackSignalCards,
-        auditTrail: fallbackAuditTrail,
-        headlineCounts: {
-          watchlistCount: "24 names",
-          eventCount: "312",
-          alertCount: "8 active",
-          confidence: "0.79",
-        },
-        decisionBias: {
-          title: "Reduce 0.18x",
-          body: "Weakening executive tone and broadening regulatory language are pressuring exposure in the lower-conviction sleeve.",
-        },
-      };
-    }
-
-    const companyMap = new Map(data.companies.map((company) => [company.id, company]));
-    const decisionMap = new Map(data.decisions.map((decision) => [decision.disclosure_event_id, decision]));
+    const companyMap = new Map(data?.companies?.map((company) => [company.id, company]) ?? []);
+    const decisionMap = new Map(data?.decisions?.map((decision) => [decision.disclosure_event_id, decision]) ?? []);
     const evidenceByEvent = new Map<string, string[]>();
 
-    for (const row of data.evidence) {
-      const snippets = evidenceByEvent.get(row.disclosure_event_id) ?? [];
-      if (snippets.length < 2) snippets.push(row.snippet);
-      evidenceByEvent.set(row.disclosure_event_id, snippets);
+    if (data?.evidence) {
+      for (const row of data.evidence) {
+        const snippets = evidenceByEvent.get(row.disclosure_event_id) ?? [];
+        if (snippets.length < 2) snippets.push(row.snippet);
+        evidenceByEvent.set(row.disclosure_event_id, snippets);
+      }
     }
 
     const watchlist =
-      data.companies.length > 0
+      data?.companies && data.companies.length > 0
         ? data.companies.slice(0, 6).map((company, index) => {
-            const signal = data.fusedSignals.find((item) => item.ticker === company.ticker);
+            const signal = data.fusedSignals?.find((item) => item.ticker === company.ticker);
             const convictionRaw =
               signal?.conviction_impact !== null && signal?.conviction_impact !== undefined
                 ? 50 + signal.conviction_impact * 100
@@ -300,10 +283,10 @@ const Fins = () => {
         : fallbackWatchlist;
 
     const filingEvents =
-      data.disclosureEvents.length > 0
+      data?.disclosureEvents && data.disclosureEvents.length > 0
         ? data.disclosureEvents.slice(0, 6).map((event) => {
             const company = companyMap.get(event.watchlist_company_id);
-            const signal = data.fusedSignals.find((item) => item.disclosure_event_id === event.id);
+            const signal = data.fusedSignals?.find((item) => item.disclosure_event_id === event.id);
             const decision = decisionMap.get(event.id);
             return {
               ticker: event.ticker,
@@ -323,17 +306,17 @@ const Fins = () => {
         : fallbackFilingEvents;
 
     const avgConfidence =
-      data.fusedSignals.length > 0
+      data?.fusedSignals && data.fusedSignals.length > 0
         ? (data.fusedSignals.reduce((sum, item) => sum + Number(item.confidence ?? 0), 0) / data.fusedSignals.length).toFixed(2)
         : "0.79";
 
-    const sentimentCounts = data.fusedSignals.reduce(
+    const sentimentCounts = data?.fusedSignals?.reduce(
       (acc, item) => {
         acc[item.directional_sentiment] += 1;
         return acc;
       },
       { positive: 0, neutral: 0, negative: 0 }
-    );
+    ) ?? { positive: 0, neutral: 0, negative: 0 };
 
     const dominantSentiment =
       sentimentCounts.negative >= sentimentCounts.positive && sentimentCounts.negative >= sentimentCounts.neutral
@@ -342,14 +325,14 @@ const Fins = () => {
           ? "Positive Momentum"
           : "Neutral Balance";
 
-    const aggregateConvictionImpact = data.fusedSignals.reduce((sum, item) => sum + Number(item.conviction_impact ?? 0), 0);
+    const aggregateConvictionImpact = data?.fusedSignals?.reduce((sum, item) => sum + Number(item.conviction_impact ?? 0), 0) ?? 0;
     const avgRiskDelta =
-      data.fusedSignals.length > 0
+      data?.fusedSignals && data.fusedSignals.length > 0
         ? Math.abs(aggregateConvictionImpact / data.fusedSignals.length).toFixed(2)
         : "0.34";
 
     const signalCards =
-      data.fusedSignals.length > 0
+      data?.fusedSignals && data.fusedSignals.length > 0
         ? [
             {
               label: "Directional Sentiment",
@@ -372,19 +355,19 @@ const Fins = () => {
             {
               label: "Action Bias",
               value:
-                data.decisions[0]?.action.replaceAll("_", " ") ??
+                data.decisions?.[0]?.action?.replaceAll("_", " ") ??
                 (aggregateConvictionImpact < 0 ? "De-risking" : "Selective add"),
               tone: "neutral",
-              detail: `${data.alerts.length} alert${data.alerts.length === 1 ? "" : "s"} currently in the system.`,
+              detail: `${data.alerts?.length ?? 0} alert${data.alerts?.length === 1 ? "" : "s"} currently in the system.`,
             },
-          ]
+          ] as SignalCard[]
         : fallbackSignalCards;
 
     const auditTrail =
-      data.disclosureEvents.length > 0
+      data?.disclosureEvents && data.disclosureEvents.length > 0
         ? data.disclosureEvents.slice(0, 3).map((event) => {
             const company = companyMap.get(event.watchlist_company_id);
-            const signal = data.fusedSignals.find((item) => item.disclosure_event_id === event.id);
+            const signal = data.fusedSignals?.find((item) => item.disclosure_event_id === event.id);
             const evidence = evidenceByEvent.get(event.id)?.[0];
             return {
               ticker: event.ticker,
@@ -401,7 +384,7 @@ const Fins = () => {
         : fallbackAuditTrail;
 
     const decisionBias =
-      data.decisions.length > 0
+      data?.decisions && data.decisions.length > 0
         ? {
             title: `${data.decisions[0].action.replaceAll("_", " ")} ${Math.round(Number(data.decisions[0].magnitude ?? 0) * 100)} bps`,
             body:
@@ -409,9 +392,9 @@ const Fins = () => {
               "Latest fused event has been routed into the decision engine with a bounded action payload.",
           }
         : {
-            title: data.alerts.length > 0 ? "Active review" : "Hold baseline",
+            title: (data?.alerts?.length ?? 0) > 0 ? "Active review" : "Hold baseline",
             body:
-              data.alerts[0]?.message ??
+              data?.alerts?.[0]?.message ??
               "The decision layer is standing by for the next material filing or transcript event.",
           };
 
@@ -421,14 +404,15 @@ const Fins = () => {
       signalCards,
       auditTrail,
       headlineCounts: {
-        watchlistCount: `${data.companies.length || watchlist.length} names`,
-        eventCount: `${data.disclosureEvents.length} events`,
-        alertCount: `${data.alerts.length} active`,
+        watchlistCount: `${(data?.companies?.length || watchlist.length)} names`,
+        eventCount: `${data?.disclosureEvents?.length ?? 0} events`,
+        alertCount: `${data?.alerts?.length ?? 0} active`,
         confidence: avgConfidence,
       },
       decisionBias,
     };
   }, [data]);
+
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#061114] text-white">

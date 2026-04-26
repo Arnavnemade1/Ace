@@ -13,19 +13,25 @@ const APP_SHELL = [
 ];
 
 async function getCachedAppShell() {
-  const staticCached = await caches.match("/index.html");
-  if (staticCached) return staticCached;
+  try {
+    const staticCached = await caches.match("/index.html");
+    if (staticCached) return staticCached;
 
-  const dynamicCache = await caches.open(DYNAMIC_CACHE);
-  const dynamicCached = await dynamicCache.match("/index.html");
-  if (dynamicCached) return dynamicCached;
-
+    const dynamicCache = await caches.open(DYNAMIC_CACHE);
+    const dynamicCached = await dynamicCache.match("/index.html");
+    if (dynamicCached) return dynamicCached;
+  } catch (err) {
+    console.error("[SW] Error accessing cache for app shell:", err);
+  }
   return null;
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(STATIC_CACHE).then((cache) => {
+      console.log("[SW] Pre-caching app shell");
+      return cache.addAll(APP_SHELL);
+    })
   );
   self.skipWaiting();
 });
@@ -50,29 +56,40 @@ self.addEventListener("message", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // We only handle GET requests
   if (event.request.method !== "GET") return;
 
   const requestUrl = new URL(event.request.url);
 
+  // 1. Handle Navigation Requests (SPA support)
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
+          // If we got a valid response, cache it as the new app shell
           if (response && response.ok) {
             const copy = response.clone();
             caches.open(DYNAMIC_CACHE).then((cache) => cache.put("/index.html", copy));
           }
           return response;
         })
-        .catch(async () => {
+        .catch(async (error) => {
+          console.warn("[SW] Navigation fetch failed, attempting cache fallback:", error);
           const cachedPage = await getCachedAppShell();
           if (cachedPage) return cachedPage;
-          return (await caches.match("/offline.html")) || Response.error();
+          
+          const offlinePage = await caches.match("/offline.html");
+          if (offlinePage) return offlinePage;
+          
+          // DO NOT return Response.error() here as it breaks the browser's native error handling
+          // Just let the error propagate or return null to allow browser default behavior
+          throw error;
         })
     );
     return;
   }
 
+  // 2. Handle Same-Origin Assets (Caching strategy: Cache First, falling back to Network)
   if (requestUrl.origin === self.location.origin) {
     event.respondWith(
       caches.match(event.request).then(async (cached) => {
@@ -91,12 +108,18 @@ self.addEventListener("fetch", (event) => {
           }
 
           return response;
-        } catch {
-          return cached || Response.error();
+        } catch (error) {
+          // If fetch fails and no cache, return the error so the browser knows it's a network issue
+          // instead of intercepting it with a generic Response.error()
+          throw error;
         }
       })
     );
+    return;
   }
+
+  // 3. For Cross-Origin requests (like Supabase), we don't intercept by default
+  // This ensures the browser's native fetch (including CORS handling) works correctly
 });
 
 self.addEventListener("push", (event) => {
