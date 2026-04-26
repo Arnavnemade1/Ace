@@ -61,9 +61,24 @@ export default function Fins() {
     }
   }, [data, isLoading, triggerSurfaceSync, selectedEventId]);
 
+  // Deduplicate Logic: Keep latest event per ticker for snapshots, keep all SEC filings
+  const deduplicatedEvents = useMemo(() => {
+    if (!data?.disclosureEvents) return [];
+    
+    const seenSnapshots = new Set<string>();
+    return data.disclosureEvents.filter((event) => {
+      if (event.filing_type === "MARKET SNAPSHOT") {
+        if (seenSnapshots.has(event.ticker)) return false;
+        seenSnapshots.add(event.ticker);
+        return true;
+      }
+      return true; // Keep all filings
+    });
+  }, [data?.disclosureEvents]);
+
   const selectedEvent = useMemo(() => {
-    return data?.disclosureEvents?.find(e => e.id === selectedEventId) || data?.disclosureEvents?.[0];
-  }, [data, selectedEventId]);
+    return data?.disclosureEvents?.find(e => e.id === selectedEventId) || deduplicatedEvents?.[0];
+  }, [data, selectedEventId, deduplicatedEvents]);
 
   const selectedSignal = useMemo(() => {
     return data?.fusedSignals?.find(s => s.disclosure_event_id === selectedEvent?.id);
@@ -84,31 +99,30 @@ export default function Fins() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-sans selection:bg-[#4ade80]/30 relative overflow-hidden">
-      {/* Aurora Atmospheric Layer */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#8b5cf6]/10 blur-[120px] rounded-full animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#10b981]/5 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
+        <div className="absolute top-[-5%] left-[-5%] w-[30%] h-[30%] bg-[#8b5cf6]/5 blur-[100px] rounded-full" />
+        <div className="absolute bottom-[-5%] right-[-5%] w-[30%] h-[30%] bg-[#10b981]/5 blur-[100px] rounded-full" />
       </div>
 
-      <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 max-w-[1920px] mx-auto space-y-32">
-        {/* Header: Aurora Brand Experience */}
-        <header className="flex flex-col lg:flex-row justify-between items-start gap-12">
-          <div className="space-y-10">
-            <div className="flex items-center gap-6">
-              <span className="font-['Dancing_Script'] font-bold text-5xl text-white">Ace</span>
-              <div className="h-6 w-px bg-white/10" />
-              <div className="text-[10px] font-mono tracking-[0.8em] text-white/30 uppercase font-bold italic">Financial_Intelligence_Network</div>
+      <main className="relative z-10 pt-24 pb-20 px-8 md:px-16 max-w-[1800px] mx-auto space-y-24">
+        {/* Header: Scaled Down Typography */}
+        <header className="flex flex-col lg:flex-row justify-between items-start gap-8">
+          <div className="space-y-6">
+            <div className="flex items-center gap-4">
+              <span className="font-['Dancing_Script'] font-bold text-4xl text-white">Ace</span>
+              <div className="h-4 w-px bg-white/10" />
+              <div className="text-[9px] font-mono tracking-[0.6em] text-white/30 uppercase font-bold">Neural_Intelligence_Network</div>
             </div>
-            <h1 className="text-8xl md:text-[11rem] font-black tracking-tighter leading-[0.8] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow pb-4">
-              Intelligence <br /> Feed.
+            <h1 className="text-6xl md:text-8xl font-black tracking-tight leading-[0.85] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow pb-2">
+              Intelligence <br /> Wire.
             </h1>
           </div>
-          <div className="hidden lg:block w-96 text-right space-y-4 pt-12">
-            <div className="text-[10px] font-mono tracking-[0.5em] text-white/20 uppercase font-bold italic border-b border-white/5 pb-2">Pipeline Status</div>
-            <div className="text-sm font-mono text-white/60 tracking-tighter uppercase overflow-hidden h-6">
+          <div className="hidden lg:block w-80 text-right space-y-2 pt-8">
+            <div className="text-[9px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold">Pipeline Status</div>
+            <div className="text-xs font-mono text-white/40 tracking-tight uppercase overflow-hidden h-5">
                 <AnimatePresence mode="wait">
-                  <motion.div key={streamIndex} initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }}>
-                    &gt; {STREAMS[streamIndex]}
+                  <motion.div key={streamIndex} initial={{ y: 15, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -15, opacity: 0 }}>
+                    {STREAMS[streamIndex]}
                   </motion.div>
                 </AnimatePresence>
             </div>
@@ -116,8 +130,8 @@ export default function Fins() {
         </header>
 
         {/* Cinematic Briefing: Center Stage */}
-        <section className="space-y-16">
-            <div className="aspect-video w-full bg-black border border-white/5 shadow-[0_50px_100px_rgba(0,0,0,0.8)] relative overflow-hidden group rounded-sm">
+        <section className="space-y-12">
+            <div className="aspect-video w-full bg-black border border-white/5 shadow-2xl relative overflow-hidden rounded-sm">
                 <Player
                     component={FinsComposition}
                     durationInFrames={180}
@@ -140,40 +154,29 @@ export default function Fins() {
             </div>
         </section>
 
-        {/* Intelligence Grid: Watchlist + Wire Feed */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-24">
-          
-          {/* Enhanced Watchlist: Premium Cards */}
-          <div className="xl:col-span-4 space-y-12">
-            <div className="flex items-center justify-between border-b border-white/5 pb-8">
-                <div className="text-[12px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold">Watchlist_Strategic</div>
-                <div className="text-[10px] font-mono text-[#10b981] uppercase tracking-widest font-bold">Active_Tracking</div>
-            </div>
-            <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-16">
+          {/* Watchlist */}
+          <div className="xl:col-span-4 space-y-10">
+            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold border-b border-white/5 pb-6">Strategic_Universe</div>
+            <div className="grid grid-cols-1 gap-3">
               {WATCHLIST_MOCK.map((company, i) => {
                 const isActive = selectedEvent?.ticker === company.ticker;
                 return (
-                    <motion.div 
-                        key={company.ticker} 
-                        onClick={() => setSelectedEventId(data?.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
-                        whileHover={{ scale: 1.02 }}
-                        className={`group relative p-8 border transition-all cursor-pointer overflow-hidden backdrop-blur-3xl ${
-                            isActive ? "bg-white/[0.03] border-white/20 shadow-[0_0_40px_rgba(139,92,246,0.1)]" : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    <motion.div key={company.ticker} onClick={() => setSelectedEventId(data?.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
+                        className={`group relative p-6 border transition-all cursor-pointer backdrop-blur-3xl ${
+                            isActive ? "bg-white/[0.04] border-white/20 shadow-xl" : "bg-white/[0.01] border-white/5 hover:border-white/10"
                         }`}
                     >
-                        {/* Status Marker */}
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 transition-all ${isActive ? "bg-[#8b5cf6]" : "bg-white/5 group-hover:bg-white/10"}`} />
-                        
-                        <div className="flex justify-between items-start">
-                            <div className="space-y-1">
-                                <h3 className={`text-4xl font-black uppercase tracking-tighter transition-colors ${isActive ? "text-white" : "text-white/40 group-hover:text-white"}`}>
+                        <div className={`absolute left-0 top-0 bottom-0 w-0.5 transition-all ${isActive ? "bg-[#8b5cf6]" : "bg-white/5"}`} />
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h3 className={`text-2xl font-black uppercase tracking-tight transition-colors ${isActive ? "text-white" : "text-white/40 group-hover:text-white"}`}>
                                     {company.ticker}
                                 </h3>
-                                <p className="text-[10px] font-mono text-white/20 uppercase tracking-[0.3em] font-bold">{company.name}</p>
+                                <p className="text-[8px] font-mono text-white/10 uppercase tracking-widest">{company.name}</p>
                             </div>
-                            <div className="text-right space-y-1">
-                                <div className="text-2xl font-black text-white/80 tracking-tighter">{company.conviction}</div>
-                                <div className="text-[9px] font-mono text-[#10b981] uppercase tracking-widest font-bold">Priority</div>
+                            <div className="text-right">
+                                <div className="text-xl font-bold text-white/70 tracking-tighter">{company.conviction}</div>
                             </div>
                         </div>
                     </motion.div>
@@ -182,64 +185,58 @@ export default function Fins() {
             </div>
           </div>
 
-          {/* Premium Intelligence Wire Feed */}
-          <div className="xl:col-span-8 space-y-12">
-            <div className="flex items-center justify-between border-b border-white/5 pb-8">
-                <div className="text-[12px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold">Neural_Wire_Feed</div>
-                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest font-bold">Sync: v2.4.0</div>
-            </div>
-            <div className="space-y-6">
-              {data?.disclosureEvents?.map((event) => {
-                const signal = data.fusedSignals.find(s => s.disclosure_event_id === event.id);
+          {/* Deduplicated Event Wire */}
+          <div className="xl:col-span-8 space-y-10">
+            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold border-b border-white/5 pb-6">Neural_Wire_Feed</div>
+            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5">
+              {deduplicatedEvents.map((event) => {
+                const signal = data?.fusedSignals.find(s => s.disclosure_event_id === event.id);
                 const isSelected = selectedEventId === event.id;
-                const sentimentColor = signal?.directional_sentiment === "positive" ? "#4ade80" : signal?.directional_sentiment === "negative" ? "#f87171" : "rgba(255,255,255,0.2)";
+                const sentimentColor = signal?.directional_sentiment === "positive" ? "#4ade80" : signal?.directional_sentiment === "negative" ? "#f87171" : "rgba(255,255,255,0.1)";
                 
                 return (
-                    <motion.div 
-                        key={event.id} 
-                        onClick={() => setSelectedEventId(event.id)}
-                        whileHover={{ x: 10 }}
-                        className={`group relative p-10 border transition-all cursor-pointer backdrop-blur-3xl overflow-hidden ${
-                            isSelected ? "bg-white/[0.05] border-white/20 shadow-[0_20px_80px_rgba(0,0,0,0.4)]" : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    <motion.div key={event.id} onClick={() => setSelectedEventId(event.id)}
+                        className={`group relative p-8 border transition-all cursor-pointer backdrop-blur-3xl overflow-hidden ${
+                            isSelected ? "bg-white/[0.06] border-white/20 shadow-2xl" : "bg-white/[0.01] border-white/5 hover:border-white/10"
                         }`}
                     >
-                        <div className="flex flex-col gap-8 relative z-10">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-8">
-                                    <span className="text-[10px] font-mono px-4 py-1.5 border border-white/10 text-white/40 tracking-[0.4em] uppercase font-bold">
-                                        {event.filing_type}
-                                    </span>
-                                    <span className="text-[10px] font-mono text-white/10 uppercase tracking-widest font-bold italic">
-                                        {new Date(event.event_timestamp).toLocaleTimeString()}
-                                    </span>
+                        <div className="absolute left-0 top-0 bottom-0 w-1 opacity-40" style={{ backgroundColor: sentimentColor }} />
+                        
+                        <div className="flex flex-col gap-6">
+                            <div className="flex items-center justify-between text-[9px] font-mono">
+                                <div className="flex items-center gap-6">
+                                    <span className="px-3 py-1 border border-white/5 text-white/30 tracking-widest uppercase font-bold">{event.filing_type}</span>
+                                    <span className="text-white/10 uppercase tracking-widest">{new Date(event.event_timestamp).toLocaleTimeString()}</span>
                                 </div>
                                 <div className="flex items-center gap-4">
-                                    <span className="text-[10px] font-mono text-white/40 uppercase tracking-[0.4em] font-bold">{event.ticker}</span>
-                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sentimentColor, boxShadow: `0 0 15px ${sentimentColor}` }} />
+                                    <span className="text-white/40 uppercase tracking-[0.2em] font-bold">{event.ticker}</span>
+                                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sentimentColor, boxShadow: `0 0 10px ${sentimentColor}` }} />
                                 </div>
                             </div>
 
-                            <div className="space-y-4">
-                                <h3 className={`text-4xl md:text-5xl font-black uppercase tracking-tighter leading-tight transition-colors ${isSelected ? "text-white" : "text-white/60 group-hover:text-white"}`}>
+                            <div className="space-y-3">
+                                <h3 className={`text-2xl md:text-3xl font-black uppercase tracking-tight transition-colors ${isSelected ? "text-white" : "text-white/60 group-hover:text-white"}`}>
                                     {event.title || "Intelligence Summary"}
                                 </h3>
-                                <p className="text-xl text-white/30 leading-relaxed font-light italic max-w-5xl pl-8 border-l border-white/5">
-                                    "{signal?.causal_summary || "Analyzing strategic narrative shift and policy deviation benchmarks..."}"
-                                </p>
+                                {event.filing_type !== "MARKET SNAPSHOT" && signal?.causal_summary && (
+                                    <p className="text-base text-white/30 leading-relaxed max-w-4xl font-light italic">
+                                        "{signal.causal_summary}"
+                                    </p>
+                                )}
                             </div>
 
-                            <div className="flex items-center justify-between pt-8 border-t border-white/[0.02]">
-                                <div className="flex gap-12">
-                                    <div className="space-y-1">
-                                        <div className="text-[9px] font-mono text-white/20 uppercase tracking-[0.4em] font-bold">Conviction</div>
-                                        <div className="text-lg font-bold text-white/60">{(signal?.confidence || 0.85).toFixed(2)}</div>
+                            <div className="flex items-center justify-between pt-6 border-t border-white/[0.03]">
+                                <div className="flex gap-8">
+                                    <div className="space-y-0.5">
+                                        <div className="text-[8px] font-mono text-white/10 uppercase tracking-widest">Confidence</div>
+                                        <div className="text-sm font-bold text-white/40">{(signal?.confidence || 0.85).toFixed(2)}</div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[9px] font-mono text-white/20 uppercase tracking-[0.4em] font-bold">Sentiment</div>
-                                        <div className="text-lg font-bold uppercase tracking-widest" style={{ color: sentimentColor }}>{signal?.directional_sentiment || "Neutral"}</div>
+                                    <div className="space-y-0.5">
+                                        <div className="text-[8px] font-mono text-white/10 uppercase tracking-widest">Sentiment</div>
+                                        <div className="text-sm font-bold uppercase tracking-widest" style={{ color: sentimentColor }}>{signal?.directional_sentiment || "Neutral"}</div>
                                     </div>
                                 </div>
-                                <div className="text-[10px] font-mono text-white/10 uppercase tracking-[0.5em] font-bold italic italic">ACE_SYNC_STABLE</div>
+                                <div className="text-[9px] font-mono text-white/5 uppercase tracking-[0.4em] font-bold">ACE_SYNC_STABLE</div>
                             </div>
                         </div>
                     </motion.div>
@@ -250,19 +247,15 @@ export default function Fins() {
         </div>
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 h-20 bg-[#020202]/95 backdrop-blur-3xl border-t border-white/[0.03] z-50 flex items-center px-12">
-        <div className="flex items-center gap-12 text-[11px] font-mono tracking-[0.5em] text-white/20 uppercase w-full font-bold">
+      <footer className="fixed bottom-0 left-0 right-0 h-16 bg-[#020202]/95 backdrop-blur-3xl border-t border-white/[0.03] z-50 flex items-center px-12">
+        <div className="flex items-center gap-12 text-[10px] font-mono tracking-[0.5em] text-white/20 uppercase w-full font-bold">
           <div className="flex items-center gap-4 text-[#10b981]">
-            <div className="w-2 h-2 rounded-full bg-[#10b981] shadow-[0_0_15px_#10b981]" />
+            <div className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />
             FINS_OPERATIONAL
           </div>
           <div className="h-4 w-px bg-white/10" />
-          <span>REALTIME_SYNC_ACTIVE // CYCLE_24H</span>
-          <div className="ml-auto flex items-center gap-8 text-white/10">
-            <span>ACE_PROT_V2.4</span>
-            <div className="h-4 w-px bg-white/5" />
-            <span>ENCRYPTED_LINK_STABLE</span>
-          </div>
+          <span>REALTIME_SYNC // CYCLE_24H</span>
+          <div className="ml-auto text-white/5">V2.4.0_SECURE_LINK</div>
         </div>
       </footer>
     </div>
