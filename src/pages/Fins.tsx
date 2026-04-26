@@ -8,7 +8,7 @@ import { useFinsData } from "@/hooks/useFinsData";
 
 /**
  * FINS: Financial Intelligence Network Surface
- * A streamlined, high-fidelity interface focused on the cinematic intelligence briefing.
+ * A premium, high-fidelity interface focused on cinematic intelligence briefings.
  */
 
 const STREAMS = [
@@ -84,9 +84,9 @@ export default function Fins() {
             <div className="flex items-center gap-6">
               <span className="font-['Dancing_Script'] font-bold text-5xl text-white">Ace</span>
               <div className="h-6 w-px bg-white/10" />
-              <div className="text-[11px] font-mono tracking-[0.6em] text-white/30 uppercase">// Disclosure_Intelligence_Hub</div>
+              <div className="text-[11px] font-mono tracking-[0.6em] text-white/30 uppercase font-medium tracking-[0.8em]">Disclosure_Intelligence_Hub</div>
             </div>
-            <h1 className="text-7xl md:text-9xl font-black tracking-tight leading-[0.9] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow">
+            <h1 className="text-7xl md:text-9xl font-black tracking-tight leading-[0.9] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow pb-4">
               Filing <br /> Analysis.
             </h1>
           </div>
@@ -103,7 +103,7 @@ export default function Fins() {
         </header>
 
         <section className="space-y-12">
-            <div className="aspect-video w-full bg-black border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
+            <div className="aspect-video w-full bg-black border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)] relative overflow-hidden group">
                 <Player
                     component={FinsComposition}
                     durationInFrames={180}
@@ -128,58 +128,92 @@ export default function Fins() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
           <div className="lg:col-span-4 space-y-10">
-            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Watchlist</div>
-            <div className="space-y-2 max-h-[800px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/5">
-              {data?.companies?.map((company, i) => (
-                <div key={company.id} onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
-                    className={`p-4 border transition-all cursor-pointer group flex justify-between items-center ${
-                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/30 bg-white/[0.03]" : "border-white/5 bg-transparent hover:border-white/10"
+            <div className="flex items-center justify-between border-b border-white/[0.03] pb-6">
+                <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold">Watchlist</div>
+                <div className="text-[9px] font-mono text-white/10 uppercase tracking-widest">Tracking Strategic Assets</div>
+            </div>
+            <div className="space-y-3 max-h-[800px] overflow-y-auto pr-4 scrollbar-none">
+              {data?.companies?.length === 0 ? (
+                  <div className="p-8 border border-white/5 bg-white/[0.01] text-center space-y-4">
+                      <div className="text-xs text-white/20 uppercase font-mono tracking-widest italic">No assets detected in current tier</div>
+                      <p className="text-[10px] text-white/10 leading-relaxed uppercase">The intelligence network is currently focusing on top-tier strategic identifiers. Add companies to your watchlist to initiate neural filtering.</p>
+                  </div>
+              ) : data?.companies?.map((company, i) => (
+                <motion.div 
+                    key={company.id} 
+                    onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
+                    whileHover={{ x: 4 }}
+                    className={`p-5 border transition-all cursor-pointer group flex justify-between items-center backdrop-blur-md ${
+                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/40 bg-[#4ade80]/5" : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
                     }`}>
                   <div>
-                    <h3 className="text-xl font-black uppercase text-white group-hover:text-[#4ade80]">{company.ticker}</h3>
-                    <p className="text-[9px] font-mono text-white/20 uppercase">{company.company_name}</p>
+                    <h3 className="text-xl font-black uppercase text-white group-hover:text-[#4ade80] transition-colors tracking-tight">{company.ticker}</h3>
+                    <p className="text-[9px] font-mono text-white/20 uppercase tracking-tighter">{company.company_name}</p>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-bold text-white tracking-tighter">{80 - i}%</div>
+                    <div className="text-lg font-bold text-white/80 tracking-tighter">{80 - i}%</div>
+                    <div className="text-[8px] font-mono text-white/10 uppercase tracking-widest font-bold">Priority</div>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
 
           <div className="lg:col-span-8 space-y-10">
-            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Event_Wire_Log</div>
-            <div className="space-y-1 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5 font-mono">
+            <div className="flex items-center justify-between border-b border-white/[0.03] pb-6">
+                <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase italic font-bold">Intelligence Feed</div>
+                <div className="text-[9px] font-mono text-white/10 uppercase tracking-widest font-bold italic">Neural Sync: v2.4.0</div>
+            </div>
+            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5">
               {data?.disclosureEvents?.map((event) => {
                 const signal = data.fusedSignals.find(s => s.disclosure_event_id === event.id);
                 const isSnapshot = event.filing_type === "MARKET SNAPSHOT";
+                const sentimentColor = signal?.directional_sentiment === "positive" ? "#4ade80" : signal?.directional_sentiment === "negative" ? "#f87171" : "rgba(255,255,255,0.1)";
                 
+                // Clean Title: Remove redundant Ticker and "MARKET SNAPSHOT" if obvious
+                let cleanTitle = event.title || "Neutral Interpretation";
+                if (isSnapshot) {
+                    cleanTitle = cleanTitle.replace(`${event.ticker}: `, '').replace(`${event.ticker} `, '');
+                    cleanTitle = cleanTitle.replace('MARKET SNAPSHOT', '').trim();
+                    if (!cleanTitle) cleanTitle = "Market Pulse Update";
+                }
+
                 return (
                     <motion.div key={event.id} onClick={() => setSelectedEventId(event.id)}
-                        className={`p-4 border transition-all relative group cursor-pointer flex flex-col gap-2 ${
-                            selectedEventId === event.id ? "bg-white/[0.05] border-white/20" : "bg-transparent border-white/[0.03] hover:bg-white/[0.02]"
+                        whileHover={{ y: -2 }}
+                        className={`p-6 border transition-all relative group cursor-pointer flex flex-col gap-4 backdrop-blur-3xl overflow-hidden ${
+                            selectedEventId === event.id ? "bg-white/[0.04] border-white/20 shadow-[0_20px_50px_rgba(0,0,0,0.3)]" : "bg-white/[0.01] border-white/5 hover:border-white/10"
                         }`}
                     >
-                        <div className="flex items-center justify-between text-[10px]">
-                            <div className="flex items-center gap-4">
-                                <span className={`px-2 py-0.5 border ${isSnapshot ? "border-white/10 text-white/40" : "border-[#4ade80]/20 text-[#4ade80]"} font-bold`}>
+                        {/* Sentiment Stripe */}
+                        <div className="absolute left-0 top-0 bottom-0 w-1 opacity-60" style={{ backgroundColor: sentimentColor }} />
+
+                        <div className="flex items-center justify-between text-[10px] font-mono">
+                            <div className="flex items-center gap-6">
+                                <span className={`px-2 py-0.5 border ${isSnapshot ? "border-white/10 text-white/30" : "border-[#4ade80]/20 text-[#4ade80]"} font-bold tracking-widest`}>
                                     {event.filing_type}
                                 </span>
-                                <span className="text-white/20">{new Date(event.event_timestamp).toLocaleTimeString()}</span>
+                                <span className="text-white/20 tracking-widest">{new Date(event.event_timestamp).toLocaleTimeString()}</span>
                             </div>
-                            <div className={`font-bold ${signal?.directional_sentiment === "positive" ? "text-[#4ade80]" : signal?.directional_sentiment === "negative" ? "text-[#f87171]" : "text-white/30"}`}>
-                                {signal?.directional_sentiment?.toUpperCase() || "NEUTRAL"}
+                            <div className="flex items-center gap-3">
+                                <span className="text-white/10 uppercase font-bold tracking-[0.2em]">{event.ticker}</span>
+                                <div className={`w-1 h-1 rounded-full`} style={{ backgroundColor: sentimentColor, boxShadow: `0 0 10px ${sentimentColor}` }} />
                             </div>
                         </div>
                         
-                        <div className="flex flex-col gap-1">
-                            <h3 className={`text-sm font-bold uppercase ${selectedEventId === event.id ? "text-white" : "text-white/70"}`}>
-                                {event.ticker}: {event.title || "Intelligence Summary"}
+                        <div className="space-y-2 relative">
+                            <h3 className={`text-2xl font-black uppercase tracking-tight ${selectedEventId === event.id ? "text-white" : "text-white/60 group-hover:text-white/80"} transition-colors`}>
+                                {cleanTitle}
                             </h3>
-                            {!isSnapshot && (
-                                <p className="text-xs text-white/40 leading-relaxed max-w-4xl italic">
-                                    {signal?.causal_summary}
+                            {!isSnapshot && signal?.causal_summary && (
+                                <p className="text-sm text-white/40 leading-relaxed max-w-4xl font-light italic pl-4 border-l border-white/5">
+                                    "{signal.causal_summary}"
                                 </p>
+                            )}
+                            {isSnapshot && (
+                                <div className="text-[10px] text-white/20 uppercase tracking-widest font-bold">
+                                    {signal?.directional_sentiment?.toUpperCase() || "NEUTRAL"} // NO_MATERIAL_SHIFT_DETECTED
+                                </div>
                             )}
                         </div>
                     </motion.div>
@@ -190,18 +224,18 @@ export default function Fins() {
         </div>
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 h-16 bg-[#020202]/80 backdrop-blur-3xl border-t border-white/[0.03] z-50 flex items-center px-12">
+      <footer className="fixed bottom-0 left-0 right-0 h-16 bg-[#020202]/90 backdrop-blur-3xl border-t border-white/[0.03] z-50 flex items-center px-12">
         <div className="flex items-center gap-12 text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase w-full">
           <div className="flex items-center gap-4 text-[#4ade80]">
             <div className="w-2 h-2 rounded-full bg-[#4ade80] shadow-[0_0_10px_#4ade80]" />
             FINS_OPERATIONAL
           </div>
           <div className="h-4 w-px bg-white/10" />
-          <span>Auto-Sync Cycle: 24H Active</span>
+          <span>Autonomous Neural Sync Active</span>
           <div className="ml-auto flex items-center gap-8 text-white/10">
-            <span>V2.4.0</span>
+            <span>ACE_PROTOCOL_V2.4.0</span>
             <div className="h-4 w-px bg-white/5" />
-            <span>SESSION_SECURE</span>
+            <span>ENCRYPTED_SESSION</span>
           </div>
         </div>
       </footer>
