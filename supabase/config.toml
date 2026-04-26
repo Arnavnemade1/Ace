@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.analytics-ingestor]
 verify_jwt = false
+
+[functions.fins-surface-sync]
+verify_jwt = false

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   Building2,
@@ -13,7 +13,10 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { useFinsData } from "@/hooks/useFinsData";
+import { Button } from "@/components/ui/button";
 
 type WatchlistCompany = {
   ticker: string;
@@ -203,6 +206,47 @@ function timeAgo(value: string | null | undefined) {
 
 const Fins = () => {
   const { data, isLoading, error } = useFinsData();
+  const queryClient = useQueryClient();
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const autoPrimedRef = useRef(false);
+
+  const triggerSurfaceSync = useCallback(async (reason: "manual" | "auto") => {
+    if (isSyncing) return;
+
+    try {
+      setIsSyncing(true);
+      const { data: result, error: invokeError } = await supabase.functions.invoke("fins-surface-sync", {
+        body: { reason },
+      });
+
+      if (invokeError) throw invokeError;
+
+      setSyncNote(
+        result?.processed
+          ? `Synced ${result.processed} watchlist names from current market/news context.`
+          : "Surface sync completed."
+      );
+
+      await queryClient.invalidateQueries({ queryKey: ["fins-dashboard"] });
+    } catch (syncError) {
+      console.error("FINS sync failed", syncError);
+      setSyncNote("Surface sync failed. Check the latest deployment or Supabase function logs.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing, queryClient]);
+
+  useEffect(() => {
+    if (autoPrimedRef.current) return;
+    if (isLoading) return;
+    if (!data) return;
+
+    if (data.disclosureEvents.length === 0 || data.fusedSignals.length === 0) {
+      autoPrimedRef.current = true;
+      void triggerSurfaceSync("auto");
+    }
+  }, [data, isLoading, triggerSurfaceSync]);
 
   const derived = useMemo(() => {
     if (!data) {
@@ -420,9 +464,19 @@ const Fins = () => {
                 </div>
 
                 <div className="space-y-3 text-right">
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Control Plane</div>
-                    <div className="text-3xl font-semibold text-white">Live</div>
-                    <div className="text-sm text-white/45">Built with data from zerve</div>
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Control Plane</div>
+                  <div className="text-3xl font-semibold text-white">Live</div>
+                  <div className="text-sm text-white/45">Built with data from zerve</div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      onClick={() => void triggerSurfaceSync("manual")}
+                      disabled={isSyncing}
+                      className="mt-2 rounded-full border border-white/10 bg-white/[0.06] px-4 text-xs uppercase tracking-[0.2em] text-white hover:bg-white/[0.12]"
+                    >
+                      {isSyncing ? "Refreshing" : "Refresh Intelligence"}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -681,13 +735,16 @@ const Fins = () => {
                 {isLoading && "Loading live FINS data from Supabase."}
                 {!isLoading && !error && "The page is wired to live fins_* tables and automatically falls back to market context while the filing pipeline is still warming up."}
                 {error && "FINS data fetch hit an error. The page is still rendering with safe fallback intelligence so the surface remains usable."}
+                {syncNote && !isLoading && <span className="block pt-2 text-cyan-200">{syncNote}</span>}
               </div>
             </div>
             <div className={`${sectionClass} p-6`}>
               <div className="text-[11px] uppercase tracking-[0.28em] text-white/35">Current Status</div>
               <div className="mt-3 flex items-center gap-3 text-sm">
                 <div className={`h-2.5 w-2.5 rounded-full ${error ? "bg-amber-300" : "bg-emerald-300"}`} />
-                <span className="text-white/70">{error ? "Fallback mode active" : "Supabase live sync active"}</span>
+                <span className="text-white/70">
+                  {error ? "Fallback mode active" : isSyncing ? "Surface sync running" : "Supabase live sync active"}
+                </span>
               </div>
             </div>
           </div>
