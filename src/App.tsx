@@ -8,10 +8,12 @@ import Index from "./pages/Index";
 import AgentArena from "./pages/AgentArena";
 import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
+import Fins from "./pages/Fins";
 
 import { FloatingStatusBar } from "./components/FloatingStatusBar";
 import { HandshakeOverlay } from "./components/HandshakeOverlay";
 import Oracle from "./pages/Oracle";
+import EyeOfGod from "./pages/EyeOfGod";
 import PwaInstallButton from "./components/PwaInstallButton";
 
 const queryClient = new QueryClient();
@@ -31,6 +33,8 @@ const App = () => (
           <Route path="/arena" element={<AgentArena />} />
           <Route path="/oracle" element={<Oracle />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/eye-of-god" element={<EyeOfGod />} />
+          <Route path="/fins" element={<Fins />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
