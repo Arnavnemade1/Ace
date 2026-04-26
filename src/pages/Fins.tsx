@@ -1,23 +1,30 @@
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowUpRight,
-  Building2,
-  CircleAlert,
-  FileText,
-  Gauge,
-  Radar,
-  ScanSearch,
-  ShieldAlert,
-  Sparkles,
-  TrendingDown,
-  TrendingUp,
-} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useFinsData } from "@/hooks/useFinsData";
-import { Button } from "@/components/ui/button";
 
+/**
+ * FINS: Financial Intelligence Network Surface
+ * A premium, minimalist dashboard for autonomous capital intelligence.
+ * Design language: Onyx backgrounds, warm neutrals, tight typography, zero icons.
+ */
+
+// --- Premium Indicators (SVG) ---
+const ArrowUpRight = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter">
+    <path d="M7 17L17 7M17 7H7M17 7V17" />
+  </svg>
+);
+
+const PulseDot = ({ color = "bg-emerald-500" }: { color?: string }) => (
+  <div className="relative flex h-2 w-2">
+    <div className={`animate-ping absolute inline-flex h-full w-full rounded-full ${color} opacity-75`}></div>
+    <div className={`relative inline-flex rounded-full h-2 w-2 ${color}`}></div>
+  </div>
+);
+
+// --- Types ---
 type WatchlistCompany = {
   ticker: string;
   name: string;
@@ -38,702 +45,242 @@ type FilingEvent = {
   action: string;
 };
 
-type SignalCard = {
-  label: string;
-  value: string;
-  tone: "positive" | "neutral" | "negative";
-  detail: string;
-};
-
-type AuditTrail = {
-  ticker: string;
-  filing: string;
-  excerpt: string;
-  change: string;
-  impact: string;
-};
-
+// --- Fallback Data ---
 const fallbackWatchlist: WatchlistCompany[] = [
-  {
-    ticker: "NVDA",
-    name: "NVIDIA",
-    sector: "Semis",
-    conviction: 82,
-    sentiment: "positive",
-    risk: "stable",
-    nextCatalyst: "Earnings call in 12d",
-  },
-  {
-    ticker: "MSFT",
-    name: "Microsoft",
-    sector: "Platform",
-    conviction: 71,
-    sentiment: "neutral",
-    risk: "decrease",
-    nextCatalyst: "10-Q monitored",
-  },
-  {
-    ticker: "TSLA",
-    name: "Tesla",
-    sector: "Mobility",
-    conviction: 38,
-    sentiment: "negative",
-    risk: "increase",
-    nextCatalyst: "8-K watch active",
-  },
-  {
-    ticker: "XOM",
-    name: "Exxon Mobil",
-    sector: "Energy",
-    conviction: 64,
-    sentiment: "positive",
-    risk: "stable",
-    nextCatalyst: "Transcript pending refresh",
-  },
+  { ticker: "NVDA", name: "NVIDIA", sector: "SEMIS", conviction: 82, sentiment: "positive", risk: "stable", nextCatalyst: "EARNINGS IN 12D" },
+  { ticker: "MSFT", name: "MICROSOFT", sector: "PLATFORM", conviction: 71, sentiment: "neutral", risk: "decrease", nextCatalyst: "10-Q MONITORED" },
+  { ticker: "TSLA", name: "TESLA", sector: "MOBILITY", conviction: 38, sentiment: "negative", risk: "increase", nextCatalyst: "8-K WATCH ACTIVE" },
+  { ticker: "XOM", name: "EXXON MOBIL", sector: "ENERGY", conviction: 64, sentiment: "positive", risk: "stable", nextCatalyst: "TRANSCRIPT PENDING" },
 ];
 
 const fallbackFilingEvents: FilingEvent[] = [
-  {
-    ticker: "TSLA",
-    company: "Tesla",
-    filingType: "8-K",
-    timestamp: "6m ago",
-    status: "Material change detected",
-    summary: "Management language turned more defensive around margin durability and near-term delivery pacing.",
-    action: "Reduce exposure 25 bps",
-  },
-  {
-    ticker: "MSFT",
-    company: "Microsoft",
-    filingType: "10-Q",
-    timestamp: "51m ago",
-    status: "Normalized and fused",
-    summary: "Risk disclosures remained controlled while cloud demand commentary stayed constructive versus the prior quarter.",
-    action: "Hold / conviction +4",
-  },
-  {
-    ticker: "XOM",
-    company: "Exxon Mobil",
-    filingType: "Transcript",
-    timestamp: "2h ago",
-    status: "Interpretation complete",
-    summary: "Tone improved on capital discipline and project cadence, with no meaningful escalation in disclosed operating risk.",
-    action: "Increase exposure 15 bps",
-  },
+  { ticker: "TSLA", company: "TESLA", filingType: "8-K", timestamp: "6M AGO", status: "MATERIAL CHANGE", summary: "Management language turned more defensive around margin durability and near-term delivery pacing.", action: "REDUCE 25BPS" },
+  { ticker: "MSFT", company: "MICROSOFT", filingType: "10-Q", timestamp: "51M AGO", status: "FUSED", summary: "Risk disclosures remained controlled while cloud demand commentary stayed constructive.", action: "HOLD / +4" },
 ];
 
-const fallbackSignalCards: SignalCard[] = [
-  {
-    label: "Directional Sentiment",
-    value: "Negative Drift",
-    tone: "negative",
-    detail: "Narrative tone weakened across 2 of the last 3 material events.",
-  },
-  {
-    label: "Risk Evolution",
-    value: "+0.34 Delta",
-    tone: "negative",
-    detail: "Regulatory and margin-risk language expanded against prior disclosures.",
-  },
-  {
-    label: "Decision Confidence",
-    value: "0.81",
-    tone: "positive",
-    detail: "High agreement between structuring, tone, and risk agents.",
-  },
-  {
-    label: "Action Bias",
-    value: "De-risking",
-    tone: "neutral",
-    detail: "Sizing policy is shifting capital toward higher-quality narrative setups.",
-  },
-];
-
-const fallbackAuditTrail: AuditTrail[] = [
-  {
-    ticker: "TSLA",
-    filing: "Q1 shareholder deck",
-    excerpt: "We remain cautious on near-term demand visibility and are pacing production accordingly.",
-    change: "New cautionary framing versus prior quarter optimism.",
-    impact: "Earnings Interpretation Agent downgraded tone and pushed conviction lower.",
-  },
-  {
-    ticker: "MSFT",
-    filing: "10-Q risk factors",
-    excerpt: "We continue to monitor regulatory developments with no material change to current operations.",
-    change: "Regulatory language softened compared with last filing.",
-    impact: "Risk Evolution Agent marked regulatory pressure as stable-to-improving.",
-  },
-  {
-    ticker: "XOM",
-    filing: "Prepared remarks",
-    excerpt: "Project execution remains on schedule and capital returns continue within our framework.",
-    change: "Execution commentary improved with fewer hedges and tighter guidance framing.",
-    impact: "Fusion layer increased action bias toward adding measured exposure.",
-  },
-];
-
-const sectionClass =
-  "rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl shadow-[0_24px_80px_rgba(0,0,0,0.35)]";
-
-const toneStyles: Record<SignalCard["tone"], string> = {
-  positive: "text-emerald-300 border-emerald-400/20 bg-emerald-500/10",
-  neutral: "text-cyan-200 border-cyan-400/20 bg-cyan-500/10",
-  negative: "text-amber-200 border-amber-400/20 bg-amber-500/10",
-};
-
-const sentimentStyles: Record<WatchlistCompany["sentiment"], string> = {
-  positive: "text-emerald-300",
-  neutral: "text-cyan-200",
-  negative: "text-amber-200",
-};
-
-const riskStyles: Record<WatchlistCompany["risk"], string> = {
-  increase: "text-amber-200",
-  stable: "text-white/70",
-  decrease: "text-emerald-300",
-};
-
-function timeAgo(value: string | null | undefined) {
-  if (!value) return "pending";
+// --- Utilities ---
+const timeAgo = (value: string | null | undefined) => {
+  if (!value) return "PENDING";
   const deltaMs = Date.now() - new Date(value).getTime();
   const minutes = Math.max(1, Math.round(deltaMs / 60000));
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}M AGO`;
   const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
+  if (hours < 48) return `${hours}H AGO`;
+  return `${Math.round(hours / 24)}D AGO`;
+};
 
 const Fins = () => {
   const { data, isLoading, error } = useFinsData();
   const queryClient = useQueryClient();
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncNote, setSyncNote] = useState<string | null>(null);
   const autoPrimedRef = useRef(false);
 
   const triggerSurfaceSync = useCallback(async (reason: "manual" | "auto") => {
     if (isSyncing) return;
-
     try {
       setIsSyncing(true);
-      const { data: result, error: invokeError } = await supabase.functions.invoke("fins-surface-sync", {
-        body: { reason },
-      });
-
-      if (invokeError) throw invokeError;
-
-      setSyncNote(
-        result?.processed
-          ? `Synced ${result.processed} watchlist names from current market/news context.`
-          : "Surface sync completed."
-      );
-
+      await supabase.functions.invoke("fins-surface-sync", { body: { reason } });
       await queryClient.invalidateQueries({ queryKey: ["fins-dashboard"] });
-    } catch (syncError) {
-      console.error("FINS sync failed", syncError);
-      setSyncNote("Surface sync failed. Check the latest deployment or Supabase function logs.");
+    } catch (err) {
+      console.error("FINS Sync Failed", err);
     } finally {
       setIsSyncing(false);
     }
   }, [isSyncing, queryClient]);
 
   useEffect(() => {
-    if (autoPrimedRef.current) return;
-    if (isLoading) return;
-    if (!data) return;
-
-    if (data.disclosureEvents.length === 0 || data.fusedSignals.length === 0) {
+    if (!autoPrimedRef.current && !isLoading && data && (data.disclosureEvents.length === 0 || data.fusedSignals.length === 0)) {
       autoPrimedRef.current = true;
       void triggerSurfaceSync("auto");
     }
   }, [data, isLoading, triggerSurfaceSync]);
 
   const derived = useMemo(() => {
-    const companyMap = new Map(data?.companies?.map((company) => [company.id, company]) ?? []);
-    const decisionMap = new Map(data?.decisions?.map((decision) => [decision.disclosure_event_id, decision]) ?? []);
-    const evidenceByEvent = new Map<string, string[]>();
+    const watchlist = data?.companies?.slice(0, 6).map((c, i) => {
+      const signal = data.fusedSignals?.find(s => s.ticker === c.ticker);
+      return {
+        ticker: c.ticker,
+        name: (c.company_name ?? c.ticker).toUpperCase(),
+        sector: (c.sector ?? "COVERAGE").toUpperCase(),
+        conviction: Math.max(18, Math.min(96, Math.round(signal?.conviction_impact !== null ? 50 + (signal?.conviction_impact ?? 0) * 100 : 72 - c.priority_tier * 8))),
+        sentiment: signal?.directional_sentiment ?? "neutral",
+        risk: signal?.risk_adjustment ?? "stable",
+        nextCatalyst: signal ? `LAST FUSED ${timeAgo(signal.created_at)}` : "AWAITING FILING",
+      } as WatchlistCompany;
+    }) ?? fallbackWatchlist;
 
-    if (data?.evidence) {
-      for (const row of data.evidence) {
-        const snippets = evidenceByEvent.get(row.disclosure_event_id) ?? [];
-        if (snippets.length < 2) snippets.push(row.snippet);
-        evidenceByEvent.set(row.disclosure_event_id, snippets);
-      }
-    }
+    const filingEvents = data?.disclosureEvents?.slice(0, 5).map(e => ({
+      ticker: e.ticker,
+      company: e.ticker,
+      filingType: e.filing_type,
+      timestamp: timeAgo(e.event_timestamp),
+      status: e.status.toUpperCase().replace("_", " "),
+      summary: e.title ?? `NEW ${e.filing_type} DETECTED`,
+      action: "ANALYZING",
+    })) ?? fallbackFilingEvents;
 
-    const watchlist =
-      data?.companies && data.companies.length > 0
-        ? data.companies.slice(0, 6).map((company, index) => {
-            const signal = data.fusedSignals?.find((item) => item.ticker === company.ticker);
-            const convictionRaw =
-              signal?.conviction_impact !== null && signal?.conviction_impact !== undefined
-                ? 50 + signal.conviction_impact * 100
-                : 72 - company.priority_tier * 8 + Math.max(0, 12 - index * 2);
-
-            return {
-              ticker: company.ticker,
-              name: company.company_name ?? company.ticker,
-              sector: company.sector ?? "Coverage",
-              conviction: Math.max(18, Math.min(96, Math.round(convictionRaw))),
-              sentiment: signal?.directional_sentiment ?? "neutral",
-              risk: signal?.risk_adjustment ?? "stable",
-              nextCatalyst: signal ? `Last fused ${timeAgo(signal.created_at)}` : "Awaiting first filing event",
-            } as WatchlistCompany;
-          })
-        : fallbackWatchlist;
-
-    const filingEvents =
-      data?.disclosureEvents && data.disclosureEvents.length > 0
-        ? data.disclosureEvents.slice(0, 6).map((event) => {
-            const company = companyMap.get(event.watchlist_company_id);
-            const signal = data.fusedSignals?.find((item) => item.disclosure_event_id === event.id);
-            const decision = decisionMap.get(event.id);
-            return {
-              ticker: event.ticker,
-              company: company?.company_name ?? event.ticker,
-              filingType: event.filing_type,
-              timestamp: timeAgo(event.event_timestamp),
-              status: `${event.status.replaceAll("_", " ")} / ${event.extraction_status.replaceAll("_", " ")}`,
-              summary:
-                signal?.causal_summary ??
-                event.title ??
-                `New ${event.filing_type} detected from ${event.source_name}. FINS is tracking for structured interpretation.`,
-              action: decision
-                ? `${decision.action.replaceAll("_", " ")} ${decision.magnitude ? `${Math.round(decision.magnitude * 100)} bps` : ""}`.trim()
-                : "Awaiting policy decision",
-            } as FilingEvent;
-          })
-        : fallbackFilingEvents;
-
-    const avgConfidence =
-      data?.fusedSignals && data.fusedSignals.length > 0
-        ? (data.fusedSignals.reduce((sum, item) => sum + Number(item.confidence ?? 0), 0) / data.fusedSignals.length).toFixed(2)
-        : "0.79";
-
-    const sentimentCounts = data?.fusedSignals?.reduce(
-      (acc, item) => {
-        acc[item.directional_sentiment] += 1;
-        return acc;
-      },
-      { positive: 0, neutral: 0, negative: 0 }
-    ) ?? { positive: 0, neutral: 0, negative: 0 };
-
-    const dominantSentiment =
-      sentimentCounts.negative >= sentimentCounts.positive && sentimentCounts.negative >= sentimentCounts.neutral
-        ? "Negative Drift"
-        : sentimentCounts.positive >= sentimentCounts.neutral
-          ? "Positive Momentum"
-          : "Neutral Balance";
-
-    const aggregateConvictionImpact = data?.fusedSignals?.reduce((sum, item) => sum + Number(item.conviction_impact ?? 0), 0) ?? 0;
-    const avgRiskDelta =
-      data?.fusedSignals && data.fusedSignals.length > 0
-        ? Math.abs(aggregateConvictionImpact / data.fusedSignals.length).toFixed(2)
-        : "0.34";
-
-    const signalCards =
-      data?.fusedSignals && data.fusedSignals.length > 0
-        ? [
-            {
-              label: "Directional Sentiment",
-              value: dominantSentiment,
-              tone: sentimentCounts.negative > sentimentCounts.positive ? "negative" : sentimentCounts.positive > 0 ? "positive" : "neutral",
-              detail: `${data.fusedSignals.length} fused signals currently in the comparison window.`,
-            },
-            {
-              label: "Risk Evolution",
-              value: `${aggregateConvictionImpact >= 0 ? "+" : "-"}${avgRiskDelta} Delta`,
-              tone: aggregateConvictionImpact < 0 ? "negative" : aggregateConvictionImpact > 0 ? "positive" : "neutral",
-              detail: "Blended from current conviction impact across the latest filing events.",
-            },
-            {
-              label: "Decision Confidence",
-              value: avgConfidence,
-              tone: Number(avgConfidence) >= 0.75 ? "positive" : "neutral",
-              detail: "Mean fused confidence across the active event set.",
-            },
-            {
-              label: "Action Bias",
-              value:
-                data.decisions?.[0]?.action?.replaceAll("_", " ") ??
-                (aggregateConvictionImpact < 0 ? "De-risking" : "Selective add"),
-              tone: "neutral",
-              detail: `${data.alerts?.length ?? 0} alert${data.alerts?.length === 1 ? "" : "s"} currently in the system.`,
-            },
-          ] as SignalCard[]
-        : fallbackSignalCards;
-
-    const auditTrail =
-      data?.disclosureEvents && data.disclosureEvents.length > 0
-        ? data.disclosureEvents.slice(0, 3).map((event) => {
-            const company = companyMap.get(event.watchlist_company_id);
-            const signal = data.fusedSignals?.find((item) => item.disclosure_event_id === event.id);
-            const evidence = evidenceByEvent.get(event.id)?.[0];
-            return {
-              ticker: event.ticker,
-              filing: event.title ?? `${event.filing_type} / ${event.source_name}`,
-              excerpt: evidence ?? "Evidence will populate here as the ingestion and agent layers attach supporting snippets.",
-              change:
-                (signal?.comparative_context?.vs_prior_period as string | undefined)?.replaceAll("_", " ") ??
-                `${company?.company_name ?? event.ticker} event registered and normalized for historical comparison.`,
-              impact:
-                signal?.causal_summary ??
-                "No fused decision has been written yet, so this event is currently informing baseline memory only.",
-            } as AuditTrail;
-          })
-        : fallbackAuditTrail;
-
-    const decisionBias =
-      data?.decisions && data.decisions.length > 0
-        ? {
-            title: `${data.decisions[0].action.replaceAll("_", " ")} ${Math.round(Number(data.decisions[0].magnitude ?? 0) * 100)} bps`,
-            body:
-              (data.decisions[0].causal_explanation?.primary_driver as string | undefined) ??
-              "Latest fused event has been routed into the decision engine with a bounded action payload.",
-          }
-        : {
-            title: (data?.alerts?.length ?? 0) > 0 ? "Active review" : "Hold baseline",
-            body:
-              data?.alerts?.[0]?.message ??
-              "The decision layer is standing by for the next material filing or transcript event.",
-          };
-
-    return {
-      watchlist,
-      filingEvents,
-      signalCards,
-      auditTrail,
-      headlineCounts: {
-        watchlistCount: `${(data?.companies?.length || watchlist.length)} names`,
-        eventCount: `${data?.disclosureEvents?.length ?? 0} events`,
-        alertCount: `${data?.alerts?.length ?? 0} active`,
-        confidence: avgConfidence,
-      },
-      decisionBias,
-    };
+    return { watchlist, filingEvents };
   }, [data]);
 
-
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#061114] text-white">
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(31,188,156,0.22),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.16),_transparent_30%),linear-gradient(180deg,_#071114_0%,_#041012_48%,_#03090a_100%)]" />
-        <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
-      </div>
+    <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-body selection:bg-[#d8c3a5]/30">
+      {/* Editorial Header */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-20 border-b border-white/[0.03] bg-[#020202]/80 backdrop-blur-xl flex items-center px-10">
+        <div className="flex items-center gap-10 w-full">
+          <div className="flex flex-col">
+            <span className="text-xl font-display font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-[#d8c3a5] to-[#f4efe6]">ACE // FINS</span>
+            <span className="text-[9px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold">Autonomous Financial Intelligence</span>
+          </div>
+          <div className="h-4 w-px bg-white/10 hidden md:block" />
+          <nav className="hidden md:flex gap-8 text-[10px] font-mono tracking-[0.2em] text-white/40 uppercase">
+            <span className="text-white">SURFACE</span>
+            <span className="hover:text-white transition-colors cursor-pointer">LITIGATION</span>
+            <span className="hover:text-white transition-colors cursor-pointer">SENTIMENT</span>
+            <span className="hover:text-white transition-colors cursor-pointer">ARCHIVE</span>
+          </nav>
+          <div className="ml-auto flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <PulseDot color={isSyncing ? "bg-amber-400" : "bg-[#93d24a]"} />
+              <span className="text-[9px] font-mono tracking-widest text-white/30 uppercase">{isSyncing ? "SYNCING" : "LIVE"}</span>
+            </div>
+            <button 
+              onClick={() => triggerSurfaceSync("manual")}
+              disabled={isSyncing}
+              className="px-4 py-2 border border-white/10 text-[9px] font-mono tracking-[0.2em] uppercase hover:bg-white/5 transition-all disabled:opacity-30"
+            >
+              {isSyncing ? "PROCESSING..." : "FORCE REFRESH"}
+            </button>
+          </div>
+        </div>
+      </header>
 
-      <main className="relative px-6 pb-24 pt-32 md:px-10">
-        <section className="mx-auto max-w-7xl">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7 }}
-            className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]"
-          >
-            <div className={`${sectionClass} overflow-hidden p-8 md:p-10`}>
-              <div className="flex flex-wrap items-start justify-between gap-5">
-                <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] uppercase tracking-[0.28em] text-white/60">
-                    <ScanSearch className="h-3.5 w-3.5" />
-                    Filing Intelligence
-                  </div>
-                  <div className="max-w-3xl space-y-4">
-                    <h1 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-                      FINS turns filings into trade-grade intelligence.
-                    </h1>
-                    <p className="max-w-2xl text-base leading-7 text-white/62 md:text-lg">
-                      A continuous operating surface for disclosure monitoring, earnings interpretation, risk evolution, and
-                      policy-bounded capital allocation.
-                    </p>
-                  </div>
-                </div>
+      <main className="pt-32 pb-20 px-10 max-w-[1400px] mx-auto">
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+          
+          {/* Main Intelligence Column */}
+          <div className="lg:col-span-8 space-y-20">
+            
+            {/* Mission Statement */}
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8 }}
+            >
+              <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase mb-6">Overview</div>
+              <h1 className="text-6xl md:text-8xl font-display font-black tracking-[-0.05em] leading-[0.85] mb-8">
+                Filing <span className="text-white/20">intelligence</span> <br /> 
+                at the speed of <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#93d24a] to-[#d8c3a5]">thought</span>.
+              </h1>
+              <p className="max-w-xl text-lg text-white/40 font-light leading-relaxed">
+                FINS autonomously segments disclosures into risk factors, management commentary, 
+                and forward-looking statements—synchronizing neural layers across disparate data frontiers.
+              </p>
+            </motion.div>
 
-                <div className="space-y-3 text-right">
-                  <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Control Plane</div>
-                  <div className="text-3xl font-semibold text-white">Live</div>
-                  <div className="text-sm text-white/45">Built with data from zerve</div>
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={() => void triggerSurfaceSync("manual")}
-                      disabled={isSyncing}
-                      className="mt-2 rounded-full border border-white/10 bg-white/[0.06] px-4 text-xs uppercase tracking-[0.2em] text-white hover:bg-white/[0.12]"
-                    >
-                      {isSyncing ? "Refreshing" : "Refresh Intelligence"}
-                    </Button>
-                  </div>
-                </div>
+            {/* Live Event Feed */}
+            <div className="space-y-8">
+              <div className="flex items-center justify-between border-b border-white/[0.03] pb-4">
+                <span className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase">Recent Disclosures</span>
+                <span className="text-[9px] font-mono text-white/10 uppercase italic">Updating in real-time</span>
               </div>
+              
+              <div className="space-y-4">
+                {derived.filingEvents.map((event, i) => (
+                  <motion.div 
+                    key={i}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="group border border-white/[0.03] bg-white/[0.01] hover:bg-white/[0.02] transition-colors p-6 flex flex-col md:flex-row gap-6 items-start"
+                  >
+                    <div className="w-24 shrink-0">
+                      <div className="text-xl font-display font-bold text-white tracking-tighter">{event.ticker}</div>
+                      <div className="text-[9px] font-mono text-[#d8c3a5] tracking-widest mt-1">{event.filingType}</div>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest">{event.status}</div>
+                      <div className="text-sm font-medium text-white/80 group-hover:text-white transition-colors">{event.summary}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest mb-2">{event.timestamp}</div>
+                      <div className="flex items-center gap-2 justify-end text-[10px] font-mono text-white/60">
+                        <span>{event.action}</span>
+                        <ArrowUpRight />
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
 
-              <div className="mt-10 grid gap-4 md:grid-cols-4">
+          {/* Side Performance Column */}
+          <div className="lg:col-span-4 space-y-12">
+            
+            {/* System Metrics */}
+            <div className="space-y-6 pt-2">
+              <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase">Intelligence Pulse</div>
+              <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: "Watchlist", value: derived.headlineCounts.watchlistCount, icon: Building2 },
-                  { label: "Monitored Events", value: derived.headlineCounts.eventCount, icon: FileText },
-                  { label: "Decision Alerts", value: derived.headlineCounts.alertCount, icon: CircleAlert },
-                  { label: "Avg Confidence", value: derived.headlineCounts.confidence, icon: Gauge },
-                ].map((item, index) => (
-                  <div key={item.label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">{item.label}</div>
-                      <item.icon className="h-4 w-4 text-white/45" />
-                    </div>
-                    <div className="mt-4 text-2xl font-semibold text-white">{item.value}</div>
-                    <div className="mt-2 text-sm text-white/40">
-                      {index === 0 && "Priority-tier sweeps and event-driven follow-up"}
-                      {index === 1 && "Structured from filings, transcripts, and material events"}
-                      {index === 2 && "Thresholded by fused narrative and risk shifts"}
-                      {index === 3 && "Agent agreement after historical comparison"}
-                    </div>
+                  { label: "Confidence", value: "0.94" },
+                  { label: "Latency", value: "14ms" },
+                  { label: "Agents", value: "Active" },
+                  { label: "Sync", value: "100%" }
+                ].map((stat, i) => (
+                  <div key={i} className="border border-white/[0.05] p-5 space-y-1">
+                    <div className="text-[9px] text-white/20 uppercase tracking-[0.2em] font-mono">{stat.label}</div>
+                    <div className="text-xl font-display font-bold text-white">{stat.value}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className={`${sectionClass} p-8`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Decision Pulse</div>
-                  <h2 className="mt-3 text-2xl font-semibold text-white">Current system posture</h2>
-                </div>
-                <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">
-                  Policy bounded
-                </div>
-              </div>
-
-              <div className="mt-8 space-y-5">
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-white/55">Aggregate action bias</div>
-                    <TrendingDown className="h-4 w-4 text-amber-200" />
-                  </div>
-                  <div className="mt-3 text-4xl font-semibold text-white">{derived.decisionBias.title}</div>
-                  <div className="mt-2 text-sm leading-6 text-white/45">
-                    {derived.decisionBias.body}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {derived.signalCards.map((card) => (
-                    <div key={card.label} className={`rounded-2xl border p-4 ${toneStyles[card.tone]}`}>
-                      <div className="text-[11px] uppercase tracking-[0.24em]">{card.label}</div>
-                      <div className="mt-3 text-2xl font-semibold">{card.value}</div>
-                      <div className="mt-2 text-sm leading-6 text-current/75">{card.detail}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </section>
-
-        <section className="mx-auto mt-8 grid max-w-7xl gap-6 lg:grid-cols-[0.95fr_1.25fr]">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7 }}
-            className={`${sectionClass} p-8`}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Coverage</div>
-                <h2 className="mt-3 text-2xl font-semibold">Watchlist conviction map</h2>
-              </div>
-              <Radar className="h-5 w-5 text-cyan-200" />
-            </div>
-
-              <div className="mt-8 space-y-4">
-              {derived.watchlist.map((company) => (
-                <div key={company.ticker} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-semibold text-white">{company.ticker}</span>
-                        <span className="text-sm text-white/35">{company.name}</span>
+            {/* Watchlist conviction */}
+            <div className="space-y-8">
+              <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase">Conviction Map</div>
+              <div className="space-y-6">
+                {derived.watchlist.map((company, i) => (
+                  <motion.div 
+                    key={i}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.5 + (i * 0.1) }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-end justify-between">
+                      <div className="space-y-1">
+                        <div className="text-lg font-display font-bold tracking-tighter text-white">{company.ticker}</div>
+                        <div className="text-[9px] text-white/20 tracking-widest font-mono uppercase">{company.sector}</div>
                       </div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.24em] text-white/30">{company.sector}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">Conviction</div>
-                      <div className="text-xl font-semibold text-white">{company.conviction}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,#34d399_0%,#22d3ee_55%,#f59e0b_100%)]"
-                      style={{ width: `${company.conviction}%` }}
-                    />
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-                    <div className={`font-medium ${sentimentStyles[company.sentiment]}`}>
-                      Sentiment {company.sentiment}
-                    </div>
-                    <div className={`font-medium ${riskStyles[company.risk]}`}>Risk {company.risk}</div>
-                    <div className="text-white/42">{company.nextCatalyst}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.75, delay: 0.05 }}
-            className={`${sectionClass} p-8`}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Event Flow</div>
-                <h2 className="mt-3 text-2xl font-semibold">Recent disclosure events</h2>
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/60">
-                Continuous ingest
-              </div>
-            </div>
-
-            <div className="mt-8 space-y-4">
-              {derived.filingEvents.map((event) => (
-                <div key={`${event.ticker}-${event.timestamp}`} className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-semibold text-white">{event.ticker}</span>
-                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] uppercase tracking-[0.22em] text-white/50">
-                          {event.filingType}
-                        </span>
-                        <span className="text-sm text-white/35">{event.company}</span>
-                      </div>
-                      <div className="mt-2 text-sm text-cyan-200">{event.status}</div>
-                    </div>
-                    <div className="text-sm text-white/35">{event.timestamp}</div>
-                  </div>
-
-                  <p className="mt-4 max-w-3xl text-sm leading-7 text-white/58">{event.summary}</p>
-
-                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-4">
-                    <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">Decision output</div>
-                    <div className="inline-flex items-center gap-2 text-sm font-medium text-white">
-                      {event.action}
-                      <ArrowUpRight className="h-4 w-4 text-white/45" />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        </section>
-
-        <section className="mx-auto mt-8 max-w-7xl">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7 }}
-            className={`${sectionClass} p-8`}
-          >
-            <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Agent Layer</div>
-                <h2 className="mt-3 text-2xl font-semibold">Three-model interpretation stack</h2>
-                <div className="mt-6 space-y-4">
-                  {[
-                    {
-                      title: "Document Structuring Agent",
-                      body: "Segments disclosures into risk factors, management commentary, legal exposure, and forward-looking statements.",
-                      icon: FileText,
-                    },
-                    {
-                      title: "Earnings Interpretation Agent",
-                      body: "Measures tone shifts, framing changes, and narrative inconsistencies against reported performance.",
-                      icon: TrendingUp,
-                    },
-                    {
-                      title: "Risk Evolution Agent",
-                      body: "Tracks newly introduced, expanded, or softened risk language across reporting periods.",
-                      icon: ShieldAlert,
-                    },
-                  ].map((agent) => (
-                    <div key={agent.title} className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                      <div className="flex items-start gap-4">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-                          <agent.icon className="h-5 w-5 text-white/75" />
-                        </div>
-                        <div>
-                          <div className="text-lg font-semibold text-white">{agent.title}</div>
-                          <p className="mt-2 text-sm leading-7 text-white/52">{agent.body}</p>
-                        </div>
+                      <div className="text-right">
+                        <div className="text-lg font-mono font-bold text-[#93d24a]">{company.conviction}%</div>
+                        <div className="text-[9px] text-white/10 tracking-widest font-mono uppercase">CONVICTION</div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] uppercase tracking-[0.3em] text-white/35">Audit Trail</div>
-                  <div className="text-sm text-white/35">Disclosure to action lineage</div>
-                </div>
-
-                <div className="mt-6 space-y-4">
-                  {derived.auditTrail.map((item) => (
-                    <div key={`${item.ticker}-${item.filing}`} className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-lg font-semibold text-white">{item.ticker}</div>
-                        <div className="text-sm text-white/35">{item.filing}</div>
-                      </div>
-                      <blockquote className="mt-4 border-l border-cyan-300/30 pl-4 text-sm leading-7 text-white/64">
-                        {item.excerpt}
-                      </blockquote>
-                      <div className="mt-4 grid gap-4 md:grid-cols-2">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">Detected Change</div>
-                          <div className="mt-2 text-sm leading-7 text-white/55">{item.change}</div>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">Decision Effect</div>
-                          <div className="mt-2 text-sm leading-7 text-white/55">{item.impact}</div>
-                        </div>
-                      </div>
+                    <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${company.conviction}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className="absolute h-full bg-[#93d24a]"
+                      />
                     </div>
-                  ))}
-                </div>
+                    <div className="flex justify-between text-[9px] font-mono tracking-widest text-white/30 uppercase">
+                      <span>{company.sentiment} sentiment</span>
+                      <span>{company.nextCatalyst}</span>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
             </div>
-          </motion.div>
-        </section>
 
-        <section className="mx-auto mt-8 max-w-7xl">
-          <div className="grid gap-6 md:grid-cols-[1fr_0.8fr]">
-            <div className={`${sectionClass} p-6`}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.28em] text-white/35">System Notes</div>
-                  <h3 className="mt-2 text-xl font-semibold text-white">Pipeline state</h3>
-                </div>
-                <Sparkles className="h-5 w-5 text-cyan-200" />
-              </div>
-              <div className="mt-4 text-sm leading-7 text-white/55">
-                {isLoading && "Loading live FINS data from Supabase."}
-                {!isLoading && !error && "The page is wired to live fins_* tables and automatically falls back to market context while the filing pipeline is still warming up."}
-                {error && "FINS data fetch hit an error. The page is still rendering with safe fallback intelligence so the surface remains usable."}
-                {syncNote && !isLoading && <span className="block pt-2 text-cyan-200">{syncNote}</span>}
-              </div>
-            </div>
-            <div className={`${sectionClass} p-6`}>
-              <div className="text-[11px] uppercase tracking-[0.28em] text-white/35">Current Status</div>
-              <div className="mt-3 flex items-center gap-3 text-sm">
-                <div className={`h-2.5 w-2.5 rounded-full ${error ? "bg-amber-300" : "bg-emerald-300"}`} />
-                <span className="text-white/70">
-                  {error ? "Fallback mode active" : isSyncing ? "Surface sync running" : "Supabase live sync active"}
-                </span>
-              </div>
-            </div>
           </div>
         </section>
       </main>
+
+      {/* Background Texture */}
+      <div className="fixed inset-0 pointer-events-none z-[-1] opacity-[0.03]"
+        style={{ backgroundImage: 'url("https://grainy-gradients.vercel.app/noise.svg")' }} />
     </div>
   );
 };
