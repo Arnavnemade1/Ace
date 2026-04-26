@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Activity, BrainCircuit, Radio, Eye, ScanSearch } from "lucide-react";
+import { LayoutDashboard, Activity, BrainCircuit, Radio, ScanSearch } from "lucide-react";
 import { motion } from "framer-motion";
 
 const Navigation = () => {
@@ -9,7 +9,6 @@ const Navigation = () => {
         { name: "Terminal", path: "/", icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
         { name: "Arena", path: "/arena", icon: <BrainCircuit className="w-3.5 h-3.5" /> },
         { name: "Oracle", path: "/oracle", icon: <Radio className="w-3.5 h-3.5" /> },
-        { name: "Eye Of God", path: "/eye-of-god", icon: <Eye className="w-3.5 h-3.5" /> },
         { name: "FINS", path: "/fins", icon: <ScanSearch className="w-3.5 h-3.5" /> },
         { name: "Analytics", path: "/analytics", icon: <Activity className="w-3.5 h-3.5" /> },
     ];
