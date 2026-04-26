@@ -12,6 +12,17 @@ const APP_SHELL = [
   "/icons/pwa-512x512.png"
 ];
 
+async function getCachedAppShell() {
+  const staticCached = await caches.match("/index.html");
+  if (staticCached) return staticCached;
+
+  const dynamicCache = await caches.open(DYNAMIC_CACHE);
+  const dynamicCached = await dynamicCache.match("/index.html");
+  if (dynamicCached) return dynamicCached;
+
+  return null;
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => cache.addAll(APP_SHELL))
@@ -47,13 +58,14 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(DYNAMIC_CACHE).then((cache) => cache.put("/index.html", copy));
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(DYNAMIC_CACHE).then((cache) => cache.put("/index.html", copy));
+          }
           return response;
         })
         .catch(async () => {
-          const cache = await caches.open(DYNAMIC_CACHE);
-          const cachedPage = await cache.match("/index.html");
+          const cachedPage = await getCachedAppShell();
           if (cachedPage) return cachedPage;
           return (await caches.match("/offline.html")) || Response.error();
         })
