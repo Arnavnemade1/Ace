@@ -5,11 +5,10 @@ import { FinsComposition } from "@/components/FinsComposition";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useFinsData } from "@/hooks/useFinsData";
-import { Button } from "@/components/ui/button";
 
 /**
  * FINS: Financial Intelligence Network Surface
- * A professional, high-fidelity interface for real-time disclosure interpretation.
+ * A streamlined, high-fidelity interface focused on the cinematic intelligence briefing.
  */
 
 const STREAMS = [
@@ -20,16 +19,9 @@ const STREAMS = [
   "SYNC_COMPLETE",
 ];
 
-const agentCommentary = {
-  FilingStructurer: "Identified high-density material clusters in SEC disclosure. Normalizing semantic variance.",
-  RiskEvaluator: "Cross-referencing cautionary language with volatility benchmarks. Risk delta calculated.",
-  SentimentAnalyst: "Processing narrative tone against sector peers. Sentiment velocity showing directional bias.",
-};
-
 export default function Fins() {
   const { data, isLoading, error } = useFinsData();
   const queryClient = useQueryClient();
-  const [isSyncing, setIsSyncing] = useState(false);
   const [streamIndex, setStreamIndex] = useState(0);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const autoPrimedRef = useRef(false);
@@ -41,25 +33,24 @@ export default function Fins() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-refresh logic: trigger sync on load if not already primed
   const triggerSurfaceSync = useCallback(async (reason: "manual" | "auto") => {
-    if (isSyncing) return;
     try {
-      setIsSyncing(true);
       await supabase.functions.invoke("fins-surface-sync", { body: { reason } });
       await queryClient.invalidateQueries({ queryKey: ["fins-dashboard"] });
     } catch (e) {
       console.error("Sync failed", e);
-    } finally {
-      setIsSyncing(false);
     }
-  }, [isSyncing, queryClient]);
+  }, [queryClient]);
 
   useEffect(() => {
     if (autoPrimedRef.current || isLoading || !data) return;
-    if (data.disclosureEvents.length === 0) {
-      autoPrimedRef.current = true;
-      triggerSurfaceSync("auto");
-    } else if (!selectedEventId) {
+    
+    // Auto-refresh on mount
+    autoPrimedRef.current = true;
+    triggerSurfaceSync("auto");
+    
+    if (data.disclosureEvents.length > 0 && !selectedEventId) {
       setSelectedEventId(data.disclosureEvents[0].id);
     }
   }, [data, isLoading, triggerSurfaceSync, selectedEventId]);
@@ -76,17 +67,24 @@ export default function Fins() {
     return data?.decisions?.find(d => d.disclosure_event_id === selectedEvent?.id);
   }, [data, selectedEvent]);
 
+  const agentInsights = useMemo(() => {
+    if (!selectedSignal) return undefined;
+    return [
+      selectedSignal.causal_summary || "Analyzing narrative shift...",
+      selectedSignal.comparative_context?.primary_finding as string || "Cross-referencing benchmarks.",
+      selectedSignal.comparative_context?.impact_reasoning as string || "Fusing multi-agent context."
+    ].slice(0, 3);
+  }, [selectedSignal]);
+
   return (
     <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-sans selection:bg-[#4ade80]/30 relative overflow-hidden">
-      {/* Premium Background: Deep Spectrum */}
+      {/* Background Glows */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.05),_transparent_50%),radial-gradient(circle_at_bottom_right,_rgba(74,222,128,0.04),_transparent_50%)]" />
-        <div className="absolute inset-0 opacity-[0.02] contrast-150 brightness-150 pointer-events-none"
-          style={{ backgroundImage: 'url("https://grainy-gradients.vercel.app/noise.svg")' }} />
+        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.03),_transparent_50%),radial-gradient(circle_at_bottom_right,_rgba(74,222,128,0.02),_transparent_50%)]" />
       </div>
 
       <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 max-w-[1800px] mx-auto space-y-24">
-        {/* Header Section: Clean & Professional */}
+        {/* Header: Aurora Gradient & Professional Minimalist */}
         <header className="flex flex-col lg:flex-row justify-between items-end gap-12 border-b border-white/[0.03] pb-20">
           <div className="space-y-8">
             <div className="flex items-center gap-6">
@@ -94,57 +92,44 @@ export default function Fins() {
               <div className="h-6 w-px bg-white/10" />
               <div className="text-[11px] font-mono tracking-[0.6em] text-white/30 uppercase">// Disclosure_Intelligence_Hub</div>
             </div>
-            <h1 className="text-7xl md:text-8xl font-black tracking-tight leading-[0.9] uppercase text-[#f4efe6]">
-              Filing <br /> <span className="text-white/20">Analysis.</span>
+            <h1 className="text-7xl md:text-9xl font-black tracking-tight leading-[0.9] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow">
+              Filing <br /> Analysis.
             </h1>
             <p className="max-w-2xl text-lg text-white/40 font-light leading-relaxed">
-              Real-time processing of SEC disclosures. FINS extracts narrative divergence and policy-bounded signals without human oversight.
+              Autonomous SEC disclosure processing. Real-time narrative fusion and policy-bounded signal extraction.
             </p>
           </div>
 
-          <div className="w-full lg:w-[400px] space-y-6">
-            <div className="p-8 border border-white/5 bg-white/[0.01] backdrop-blur-3xl space-y-6 relative group">
-              <div className="flex justify-between items-center text-[10px] font-mono tracking-widest text-white/20 uppercase font-bold">
-                <span>Status</span>
-                <div className="w-1.5 h-1.5 rounded-full bg-[#4ade80] shadow-[0_0_8px_#4ade80]" />
-              </div>
-              <div className="text-xs font-mono text-white/60 tracking-tight h-5 overflow-hidden uppercase">
+          <div className="hidden lg:block w-96 text-right space-y-2">
+            <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold italic">Surface Status</div>
+            <div className="text-xs font-mono text-white/40 tracking-tight uppercase">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={streamIndex}
-                    initial={{ y: 20, opacity: 0 }}
+                    initial={{ y: 10, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -20, opacity: 0 }}
+                    exit={{ y: -10, opacity: 0 }}
                   >
-                    &gt; {STREAMS[streamIndex]}
+                    {STREAMS[streamIndex]}
                   </motion.div>
                 </AnimatePresence>
-              </div>
-              <Button 
-                onClick={() => triggerSurfaceSync("manual")}
-                disabled={isSyncing}
-                className="w-full bg-white text-black font-black text-[11px] uppercase tracking-[0.4em] h-14 rounded-none hover:bg-white/90 transition-all"
-              >
-                {isSyncing ? "SYNCING..." : "REFRESH_SURFACE"}
-              </Button>
             </div>
           </div>
         </header>
 
-        {/* Visual Briefing: Controls Removed, Stunning View */}
-        <section className="grid grid-cols-1 xl:grid-cols-12 gap-16 items-start">
-          <div className="xl:col-span-8 space-y-10">
-            <div className="flex items-end justify-between">
+        {/* Central Intelligence Briefing: Full Width Cinematic Video */}
+        <section className="space-y-12">
+            <div className="flex items-end justify-between border-b border-white/[0.03] pb-8">
                 <div className="space-y-2">
-                    <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase italic">// Atmospheric Recap</div>
-                    <h2 className="text-4xl font-black tracking-tight uppercase">Briefing</h2>
+                    <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase italic">// Atmospheric Briefing</div>
+                    <h2 className="text-4xl font-black tracking-tight uppercase">Cinematic Recap</h2>
                 </div>
                 <div className="text-right text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                    Symbol: <span className="text-[#4ade80]">${selectedEvent?.ticker || "---"}</span>
+                    Live Session // <span className="text-[#4ade80]">Auto-Refreshed</span>
                 </div>
             </div>
             
-            <div className="aspect-video w-full bg-black border border-white/5 shadow-2xl relative overflow-hidden">
+            <div className="aspect-video w-full bg-black border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
                 <Player
                     component={FinsComposition}
                     durationInFrames={180}
@@ -158,52 +143,16 @@ export default function Fins() {
                         title: selectedEvent?.title || "Neutral Market Context",
                         ticker: selectedEvent?.ticker || "ACE",
                         sentiment: selectedSignal?.directional_sentiment || "neutral",
+                        agentInsights: agentInsights,
+                        policyOutcome: selectedDecision?.action?.replace(/_/g, ' '),
+                        confidence: selectedSignal?.confidence
                     }}
                     style={{ width: '100%', height: '100%' }}
                 />
             </div>
-          </div>
-
-          {/* Selection Detail: Agents Perspective */}
-          <div className="xl:col-span-4 space-y-12 h-full">
-            <div className="space-y-8">
-                <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-4">Agent_Detail</div>
-                <div className="space-y-6">
-                    {Object.entries(agentCommentary).map(([agent, comment], i) => (
-                        <motion.div 
-                            key={agent}
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.1 }}
-                            className="p-6 border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-all space-y-4"
-                        >
-                            <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-mono text-[#4ade80] uppercase tracking-widest font-bold">{agent}</span>
-                                <div className="w-1 h-1 rounded-full bg-[#4ade80]" />
-                            </div>
-                            <p className="text-sm font-light text-white/50 leading-relaxed italic">
-                                "{selectedSignal?.comparative_context?.[agent] as string || comment}"
-                            </p>
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="p-8 border border-white/5 bg-white/[0.02] space-y-6">
-                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Policy Outcome</div>
-                <div className="space-y-2">
-                    <div className="text-3xl font-black text-white uppercase tracking-tighter">
-                        {selectedDecision?.action.replace(/_/g, ' ') || "Hold Baseline"}
-                    </div>
-                    <p className="text-[10px] text-white/30 leading-relaxed uppercase tracking-widest">
-                        {selectedDecision?.causal_explanation?.primary_driver as string || "Filing normalized for comparison. Standing by for confirmation layers."}
-                    </p>
-                </div>
-            </div>
-          </div>
         </section>
 
-        {/* Detailed Disclosure Feed */}
+        {/* Streamlined Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
           {/* Watchlist */}
           <div className="lg:col-span-4 space-y-10">
@@ -214,7 +163,7 @@ export default function Fins() {
                     key={company.id}
                     onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
                     className={`p-6 border transition-all cursor-pointer group space-y-6 ${
-                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/30 bg-[#4ade80]/5" : "border-white/5 bg-white/[0.01] hover:border-white/10"
+                        selectedEvent?.ticker === company.ticker ? "border-[#4ade80]/30 bg-white/[0.03]" : "border-white/5 bg-white/[0.01] hover:border-white/10"
                     }`}
                 >
                   <div className="flex justify-between items-start">
@@ -223,41 +172,19 @@ export default function Fins() {
                       <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest">{company.company_name}</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-[10px] font-mono text-white/20 uppercase mb-1">Conviction</div>
-                      <div className="text-2xl font-bold text-white tracking-tighter">
-                        {80 - i}%
-                      </div>
+                      <div className="text-2xl font-bold text-white tracking-tighter">{80 - i}%</div>
                     </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                          <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Signal</div>
-                          <div className="text-[11px] font-bold text-white/40 uppercase">Stable</div>
-                      </div>
-                      <div className="space-y-1 text-right">
-                          <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Risk</div>
-                          <div className="text-[11px] font-bold text-white/40 uppercase">Low</div>
-                      </div>
-                  </div>
-
-                  <div className="h-0.5 w-full bg-white/5 relative">
-                    <motion.div 
-                      className="absolute top-0 h-full bg-white/20" 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${80 - i}%` }}
-                    />
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Event Feed */}
+          {/* Event Stream */}
           <div className="lg:col-span-8 space-y-10">
             <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Event_Stream</div>
             <div className="space-y-8 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5">
-              {data?.disclosureEvents?.map((event, i) => {
+              {data?.disclosureEvents?.map((event) => {
                 const signal = data.fusedSignals.find(s => s.disclosure_event_id === event.id);
                 return (
                     <motion.div
@@ -269,49 +196,27 @@ export default function Fins() {
                     >
                         <div className="flex justify-between items-start mb-8 relative z-10">
                             <div className="flex items-center gap-6">
-                            <span className="text-[11px] font-mono px-4 py-1.5 bg-white/5 border border-white/10 text-white tracking-[0.2em] uppercase font-bold">
-                                {event.filing_type}
-                            </span>
-                            <span className="text-[11px] font-mono text-white/20 uppercase tracking-widest">
-                                {new Date(event.event_timestamp).toLocaleTimeString()}
-                            </span>
+                                <span className="text-[11px] font-mono px-4 py-1.5 bg-white/5 border border-white/10 text-white tracking-[0.2em] uppercase font-bold">
+                                    {event.filing_type}
+                                </span>
+                                <span className="text-[11px] font-mono text-white/20 uppercase tracking-widest">
+                                    {new Date(event.event_timestamp).toLocaleTimeString()}
+                                </span>
                             </div>
                             <div className={`text-[11px] font-mono uppercase tracking-[0.2em] flex items-center gap-2 font-bold ${
                                 signal?.directional_sentiment === "positive" ? "text-[#4ade80]" : signal?.directional_sentiment === "negative" ? "text-[#f87171]" : "text-white/40"
                             }`}>
-                            <div className={`w-2 h-2 rounded-full ${
-                                signal?.directional_sentiment === "positive" ? "bg-[#4ade80] shadow-[0_0_8px_#4ade80]" : signal?.directional_sentiment === "negative" ? "bg-[#f87171] shadow-[0_0_8px_#f87171]" : "bg-white/20"
-                            }`} />
-                            {signal?.directional_sentiment || "Neutral"}
+                                {signal?.directional_sentiment || "Neutral"}
                             </div>
                         </div>
                         
-                        <div className="space-y-4 relative z-10 mb-10">
-                            <h3 className="text-4xl font-black tracking-tight text-white uppercase">
+                        <div className="space-y-4 relative z-10">
+                            <h3 className="text-4xl font-black tracking-tight text-white uppercase group-hover:text-white transition-colors">
                                 {event.ticker}: {event.title || "Intelligence Summary"}
                             </h3>
                             <p className="text-xl text-white/40 leading-relaxed font-light max-w-5xl">
                                 {signal?.causal_summary || "Analyzing narrative shift and risk factors compared with prior period."}
                             </p>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 pt-10 border-t border-white/[0.05] relative z-10">
-                            <div className="space-y-2">
-                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">Insight</div>
-                                <div className="text-xs font-bold text-white/70 uppercase leading-relaxed tracking-tight">
-                                    {signal?.comparative_context?.primary_finding as string || "Detected non-material variance."}
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">Causal Effect</div>
-                                <div className="text-xs font-bold text-white/50 uppercase leading-relaxed tracking-tight">
-                                    {signal?.comparative_context?.impact_reasoning as string || "Neutral portfolio posture."}
-                                </div>
-                            </div>
-                            <div className="space-y-2 text-right">
-                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">Confidence</div>
-                                <div className="text-2xl font-black text-white">{(signal?.confidence || 0.81).toFixed(2)}</div>
-                            </div>
                         </div>
                     </motion.div>
                 );
@@ -328,7 +233,7 @@ export default function Fins() {
             FINS_OPERATIONAL
           </div>
           <div className="h-4 w-px bg-white/10" />
-          <span>Real-time Neural Sync Active</span>
+          <span>Auto-Sync Cycle: 24H Active</span>
           <div className="ml-auto flex items-center gap-8 text-white/10">
             <span>V2.4.0</span>
             <div className="h-4 w-px bg-white/5" />
