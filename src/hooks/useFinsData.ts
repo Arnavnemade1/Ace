@@ -152,11 +152,11 @@ export function useFinsData() {
       ] = await Promise.all([
         client.from("fins_watchlists").select("*").eq("status", "active").order("updated_at", { ascending: false }).limit(4),
         client.from("fins_watchlist_companies").select("*").order("priority_tier", { ascending: true }).order("ticker", { ascending: true }).limit(24),
-        client.from("fins_disclosure_events").select("*").order("event_timestamp", { ascending: false }).limit(12),
-        client.from("fins_fused_signals").select("*").order("created_at", { ascending: false }).limit(12),
-        client.from("fins_decision_records").select("*").order("created_at", { ascending: false }).limit(12),
-        client.from("fins_signal_evidence").select("*").order("created_at", { ascending: false }).limit(18),
-        client.from("fins_alerts").select("*").order("created_at", { ascending: false }).limit(8),
+        client.from("fins_disclosure_events").select("*").order("event_timestamp", { ascending: false }).limit(60),
+        client.from("fins_fused_signals").select("*").order("created_at", { ascending: false }).limit(60),
+        client.from("fins_decision_records").select("*").order("created_at", { ascending: false }).limit(60),
+        client.from("fins_signal_evidence").select("*").order("created_at", { ascending: false }).limit(100),
+        client.from("fins_alerts").select("*").order("created_at", { ascending: false }).limit(20),
         client.from("market_quotes").select("symbol, price, change_percent, source, as_of").order("as_of", { ascending: false }).limit(120),
         client.from("news_articles").select("id, title, summary, source, published_at, sentiment_hint, symbols, url").order("published_at", { ascending: false }).limit(24),
       ]);
@@ -174,7 +174,6 @@ export function useFinsData() {
         maybeThrow(evidenceRes.error),
         maybeThrow(alertsRes.error),
         maybeThrow(quotesRes.error),
-        // We don't necessarily want to crash the whole page if news fails
       ]);
 
       return {
