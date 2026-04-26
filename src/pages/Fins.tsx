@@ -1,8 +1,6 @@
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { 
-  Player 
-} from "@remotion/player";
+import { Player } from "@remotion/player";
 import { FinsComposition } from "@/components/FinsComposition";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,7 +10,6 @@ import { Button } from "@/components/ui/button";
 /**
  * FINS: Financial Intelligence Network Surface
  * A stunning, cinematic interface for real-time disclosure interpretation.
- * Uses Remotion for intelligence recaps and Ace Spectrum design language.
  */
 
 const STREAMS = [
@@ -23,22 +20,10 @@ const STREAMS = [
   "RISK_EVOLUTION_SYNC_COMPLETE...",
 ];
 
-const toneColors = {
-  positive: "text-[#93d24a]",
-  neutral: "text-[#d8c3a5]",
-  negative: "text-[#ff8362]",
-};
-
-const toneBorders = {
-  positive: "border-[#93d24a]/20",
-  neutral: "border-[#d8c3a5]/20",
-  negative: "border-[#ff8362]/20",
-};
-
-const toneGlows = {
-  positive: "shadow-[0_0_20px_rgba(147,210,74,0.1)]",
-  neutral: "shadow-[0_0_20px_rgba(216,195,165,0.1)]",
-  negative: "shadow-[0_0_20px_rgba(255,131,98,0.1)]",
+const agentCommentary = {
+  FilingStructurer: "Identified high-density material clusters in Item 1A and Management Commentary. Normalizing semantic variance.",
+  RiskEvaluator: "Cross-referencing newly introduced cautionary language with historical volatility benchmarks. Risk delta calculated.",
+  SentimentAnalyst: "Processing narrative tone against sector peers. Sentiment velocity showing significant directional bias.",
 };
 
 export default function Fins() {
@@ -46,6 +31,7 @@ export default function Fins() {
   const queryClient = useQueryClient();
   const [isSyncing, setIsSyncing] = useState(false);
   const [streamIndex, setStreamIndex] = useState(0);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const autoPrimedRef = useRef(false);
 
   useEffect(() => {
@@ -73,209 +59,286 @@ export default function Fins() {
     if (data.disclosureEvents.length === 0) {
       autoPrimedRef.current = true;
       triggerSurfaceSync("auto");
+    } else if (!selectedEventId) {
+      setSelectedEventId(data.disclosureEvents[0].id);
     }
-  }, [data, isLoading, triggerSurfaceSync]);
+  }, [data, isLoading, triggerSurfaceSync, selectedEventId]);
 
-  const latestEvent = data?.disclosureEvents?.[0];
-  const latestSignal = data?.fusedSignals?.[0];
+  const selectedEvent = useMemo(() => {
+    return data?.disclosureEvents?.find(e => e.id === selectedEventId) || data?.disclosureEvents?.[0];
+  }, [data, selectedEventId]);
+
+  const selectedSignal = useMemo(() => {
+    return data?.fusedSignals?.find(s => s.disclosure_event_id === selectedEvent?.id);
+  }, [data, selectedEvent]);
+
+  const selectedDecision = useMemo(() => {
+    return data?.decisions?.find(d => d.disclosure_event_id === selectedEvent?.id);
+  }, [data, selectedEvent]);
 
   return (
-    <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-body selection:bg-[#d8c3a5]/30 relative overflow-hidden">
-      {/* Ace Spectrum Background */}
+    <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-body selection:bg-[#93d24a]/30 relative overflow-hidden">
+      {/* High-End Background: Deep Spectrum */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[80vw] h-[80vw] rounded-full opacity-[0.08] bg-[#8b5cf6] blur-[140px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[70vw] h-[70vw] rounded-full opacity-[0.06] bg-[#00ff41] blur-[140px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[50vw] h-[50vw] rounded-full opacity-[0.04] bg-[#ea580c] blur-[160px]" />
-        <div className="absolute inset-0 opacity-[0.02] contrast-150 brightness-150 pointer-events-none"
+        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.08),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(147,210,74,0.06),_transparent_40%)]" />
+        <div className="absolute inset-0 opacity-[0.03] contrast-150 brightness-150 pointer-events-none"
           style={{ backgroundImage: 'url("https://grainy-gradients.vercel.app/noise.svg")' }} />
       </div>
 
-      <main className="relative z-10 pt-32 pb-24 px-6 md:px-10 max-w-[1600px] mx-auto space-y-20">
-        {/* Header Section */}
-        <header className="flex flex-col lg:flex-row justify-between items-end gap-10 border-b border-white/[0.03] pb-16">
-          <div className="space-y-6">
-            <div className="flex items-center gap-4">
-              <span className="font-['Dancing_Script'] font-bold text-4xl text-white">Ace</span>
-              <div className="h-4 w-px bg-white/10" />
-              <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold italic">// Disclosure_Intelligence_Surface</div>
+      <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 max-w-[1800px] mx-auto space-y-24">
+        {/* Header Section: Premium Typography */}
+        <header className="flex flex-col lg:flex-row justify-between items-end gap-12 border-b border-white/[0.03] pb-20">
+          <div className="space-y-8">
+            <div className="flex items-center gap-6">
+              <span className="font-['Dancing_Script'] font-bold text-5xl text-white">Ace</span>
+              <div className="h-6 w-px bg-white/10" />
+              <div className="text-[11px] font-mono tracking-[0.6em] text-white/30 uppercase italic">// Financial_Intelligence_Network</div>
             </div>
-            <h1 className="text-6xl md:text-8xl font-display font-black tracking-tighter leading-[0.8] uppercase">
-              Financial <br /> <span className="text-white/20">Intelligence.</span>
+            <h1 className="text-7xl md:text-9xl font-display font-black tracking-tight leading-[0.85] uppercase text-[#f4efe6] font-outfit">
+              Corporate <br /> <span className="text-white/10 italic font-serif font-light lowercase font-cormorant">Whispers.</span>
             </h1>
-            <p className="max-w-2xl text-lg text-white/40 font-light leading-relaxed">
-              Fusing SEC filings, earnings transcripts, and material events into autonomous trade-grade intelligence. Zero human bias. Absolute narrative transparency.
+            <p className="max-w-3xl text-xl text-white/40 font-light leading-relaxed font-cormorant italic">
+              Autonomous parsing of SEC EDGAR disclosures and material earnings events. FINS extracts narrative divergence, risk acceleration, and policy-bounded signals in real-time.
             </p>
           </div>
 
-          <div className="w-full lg:w-96 space-y-6">
-            <div className="p-6 border border-white/5 bg-white/[0.01] backdrop-blur-3xl space-y-4 relative group">
-              <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="flex justify-between items-center text-[9px] font-mono tracking-widest text-white/20 uppercase italic">
-                <span>Neural Stream</span>
-                <div className="w-1.5 h-1.5 rounded-full bg-[#93d24a] animate-pulse shadow-[0_0_8px_#93d24a]" />
+          <div className="w-full lg:w-[400px] space-y-6">
+            <div className="p-8 border border-white/5 bg-white/[0.01] backdrop-blur-3xl space-y-6 relative group">
+              <div className="flex justify-between items-center text-[10px] font-mono tracking-widest text-white/20 uppercase">
+                <span>System Pulse</span>
+                <div className="flex gap-1.5">
+                    <div className="w-1 h-1 rounded-full bg-[#93d24a] animate-ping" />
+                    <div className="w-1 h-1 rounded-full bg-[#93d24a]" />
+                </div>
               </div>
-              <div className="text-[11px] font-mono text-[#d8c3a5] tracking-tight h-4 overflow-hidden">
-                <motion.div
-                  key={streamIndex}
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: -20, opacity: 0 }}
-                >
-                  &gt; {STREAMS[streamIndex]}
-                </motion.div>
+              <div className="text-xs font-mono text-[#d8c3a5] tracking-tight h-5 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={streamIndex}
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -20, opacity: 0 }}
+                  >
+                    {STREAMS[streamIndex]}
+                  </motion.div>
+                </AnimatePresence>
               </div>
               <Button 
                 onClick={() => triggerSurfaceSync("manual")}
                 disabled={isSyncing}
-                className="w-full bg-white text-black font-display font-black text-[10px] uppercase tracking-[0.3em] h-12 rounded-none hover:scale-[1.02] transition-transform"
+                className="w-full bg-[#f4efe6] text-black font-black text-[11px] uppercase tracking-[0.4em] h-14 rounded-none hover:bg-white transition-all shadow-[0_0_40px_rgba(244,239,230,0.1)]"
               >
-                {isSyncing ? "SYNCING_PIPELINE..." : "REFRESH_INTELLIGENCE"}
+                {isSyncing ? "SYNCING..." : "SYNC_SURFACE"}
               </Button>
             </div>
           </div>
         </header>
 
-        {/* Cinematic Recap Player */}
-        <section className="space-y-8">
-          <div className="flex items-center justify-between border-b border-white/[0.03] pb-6">
-            <div className="space-y-1">
-              <div className="text-[10px] font-mono tracking-[0.3em] text-white/20 uppercase italic">// Intelligence Recap</div>
-              <h2 className="text-3xl font-display font-black tracking-tighter uppercase">Cinematic Briefing</h2>
+        {/* Cinematic Briefing: Selection Synced Video */}
+        <section className="grid grid-cols-1 xl:grid-cols-12 gap-16 items-start">
+          <div className="xl:col-span-8 space-y-10">
+            <div className="flex items-end justify-between">
+                <div className="space-y-2">
+                    <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase italic">// Agent Recap Video</div>
+                    <h2 className="text-4xl font-display font-black tracking-tight uppercase font-outfit">Visual Briefing</h2>
+                </div>
+                <div className="text-right text-[10px] font-mono text-white/20 uppercase tracking-widest">
+                    Selection: <span className="text-[#93d24a]">${selectedEvent?.ticker || "---"}</span>
+                </div>
             </div>
-            <div className="flex gap-4 items-center">
-              <span className="text-[9px] font-mono text-white/20 uppercase tracking-widest">Powered by Remotion</span>
-              <div className="h-2 w-2 rounded-full bg-[#ff8362] shadow-[0_0_8px_#ff8362]" />
+            
+            <div className="aspect-video w-full bg-black border border-white/5 shadow-2xl relative group overflow-hidden">
+                <Player
+                    component={FinsComposition}
+                    durationInFrames={180}
+                    compositionWidth={1920}
+                    compositionHeight={1080}
+                    fps={30}
+                    controls
+                    autoPlay
+                    loop
+                    inputProps={{
+                        title: selectedEvent?.title || "Neutral Market Context",
+                        summary: selectedSignal?.causal_summary || "Analyzing the latest disclosure events for material narrative shifts and risk evolution.",
+                        ticker: selectedEvent?.ticker || "ACE",
+                        sentiment: selectedSignal?.directional_sentiment || "neutral",
+                        confidence: selectedSignal?.confidence || 0.85,
+                        agents: ["FilingStructurer", "RiskEvaluator", "SentimentAnalyst"]
+                    }}
+                    style={{ width: '100%', height: '100%' }}
+                />
             </div>
           </div>
 
-          <div className="aspect-video w-full bg-black border border-white/5 relative overflow-hidden group shadow-2xl">
-            <Player
-              component={FinsComposition}
-              durationInFrames={150}
-              compositionWidth={1920}
-              compositionHeight={1080}
-              fps={30}
-              controls
-              autoPlay
-              loop
-              inputProps={{
-                title: latestSignal?.causal_summary || latestEvent?.title || "Filing Intelligence Synchronized",
-                summary: latestSignal?.comparative_context?.vs_prior_period || "Analyzing the latest disclosure events for material narrative shifts and risk evolution.",
-                ticker: latestEvent?.ticker || "ACE",
-              }}
-              style={{
-                width: '100%',
-                height: '100%',
-              }}
-            />
-            <div className="absolute inset-0 pointer-events-none border border-white/10 group-hover:border-white/20 transition-colors z-10" />
+          {/* Selection Detail: Agents Perspective */}
+          <div className="xl:col-span-4 space-y-12 h-full">
+            <div className="space-y-8">
+                <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase italic border-b border-white/[0.03] pb-4">Agent_Perspective_Detail</div>
+                <div className="space-y-6">
+                    {Object.entries(agentCommentary).map(([agent, comment], i) => (
+                        <motion.div 
+                            key={agent}
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.1 }}
+                            className="p-6 border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-all space-y-4"
+                        >
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-mono text-[#93d24a] uppercase tracking-widest">{agent}</span>
+                                <div className="w-1 h-1 rounded-full bg-[#93d24a]" />
+                            </div>
+                            <p className="text-sm font-light text-white/50 leading-relaxed font-cormorant italic">
+                                "{selectedSignal?.comparative_context?.[agent] as string || comment}"
+                            </p>
+                        </motion.div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="p-8 border border-white/5 bg-white/[0.02] space-y-6">
+                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Policy Outcome</div>
+                <div className="space-y-2">
+                    <div className="text-3xl font-display font-black text-white uppercase font-outfit">
+                        {selectedDecision?.action.replace(/_/g, ' ') || "Hold Baseline"}
+                    </div>
+                    <p className="text-xs text-white/30 leading-relaxed uppercase tracking-tighter">
+                        {selectedDecision?.causal_explanation?.primary_driver as string || "Filing normalized for historical comparison. Standing by for additional confirmation layers."}
+                    </p>
+                </div>
+            </div>
           </div>
         </section>
 
-        {/* Main Intelligence Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-          {/* Watchlist Section */}
-          <div className="lg:col-span-4 space-y-8">
-            <div className="text-[10px] font-mono tracking-[0.3em] text-white/20 uppercase border-b border-white/[0.03] pb-4 italic">Watchlist_Conviction_Map</div>
-            <div className="space-y-4">
-              {data?.companies?.slice(0, 6).map((company, i) => (
-                <motion.div
-                  key={company.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="p-6 border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all group"
+        {/* Detailed Disclosure Feed */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
+          {/* Watchlist: High Detail */}
+          <div className="lg:col-span-4 space-y-10">
+            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Strategic_Watchlist</div>
+            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/5">
+              {data?.companies?.map((company, i) => (
+                <div 
+                    key={company.id}
+                    onClick={() => setSelectedEventId(data.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
+                    className={`p-6 border transition-all cursor-pointer group space-y-6 ${
+                        selectedEvent?.ticker === company.ticker ? "border-[#93d24a]/30 bg-[#93d24a]/5" : "border-white/5 bg-white/[0.01] hover:border-white/10"
+                    }`}
                 >
-                  <div className="flex justify-between items-start mb-6">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="text-2xl font-display font-black tracking-tighter uppercase">{company.ticker}</h3>
+                      <h3 className="text-3xl font-display font-black tracking-tight uppercase font-outfit text-white group-hover:text-[#93d24a] transition-colors">{company.ticker}</h3>
                       <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest">{company.company_name}</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-[9px] font-mono text-white/20 uppercase mb-1">Conviction</div>
-                      <div className="text-xl font-display font-bold text-[#d8c3a5]">
-                        {70 + (i * 4)}%
+                      <div className="text-[10px] font-mono text-white/20 uppercase mb-1">Conviction</div>
+                      <div className="text-2xl font-display font-bold text-white tracking-tighter">
+                        {80 - i}%
                       </div>
                     </div>
                   </div>
-                  <div className="h-0.5 w-full bg-white/5 relative overflow-hidden">
-                    <div 
-                      className="absolute top-0 h-full bg-gradient-to-r from-[#d8c3a5] to-[#f4efe6] shadow-[0_0_10px_rgba(216,195,165,0.3)]" 
-                      style={{ width: `${70 + (i * 4)}%` }} 
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                          <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Signal Pulse</div>
+                          <div className="text-[11px] font-bold text-[#d8c3a5] uppercase">Normalized</div>
+                      </div>
+                      <div className="space-y-1 text-right">
+                          <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Risk Level</div>
+                          <div className="text-[11px] font-bold text-white/60 uppercase">Stable</div>
+                      </div>
+                  </div>
+
+                  <div className="h-0.5 w-full bg-white/5 relative">
+                    <motion.div 
+                      className="absolute top-0 h-full bg-white/20" 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${80 - i}%` }}
                     />
                   </div>
-                </motion.div>
+                </div>
               ))}
             </div>
           </div>
 
-          {/* Event Flow Section */}
-          <div className="lg:col-span-8 space-y-8">
-            <div className="text-[10px] font-mono tracking-[0.3em] text-white/20 uppercase border-b border-white/[0.03] pb-4 italic">Recent_Disclosure_Events</div>
-            <div className="space-y-6">
-              {data?.disclosureEvents?.slice(0, 5).map((event, i) => (
-                <motion.div
-                  key={event.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className={`p-8 border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-all relative overflow-hidden group`}
-                >
-                  <div className="flex justify-between items-start mb-6 relative z-10">
-                    <div className="flex items-center gap-4">
-                      <span className="text-[10px] font-mono px-3 py-1 bg-white/5 border border-white/10 text-[#d8c3a5] tracking-widest uppercase">
-                        {event.filing_type}
-                      </span>
-                      <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                        {new Date(event.event_timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <div className="text-[10px] font-mono text-[#93d24a] uppercase tracking-[0.2em] flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#93d24a] animate-pulse" />
-                      Decision: {event.status}
-                    </div>
-                  </div>
-                  
-                  <h3 className="text-2xl font-display font-black tracking-tight text-white mb-4 relative z-10 uppercase">
-                    {event.ticker}: {event.title || "Material Filing Detected"}
-                  </h3>
-                  
-                  <p className="text-white/40 leading-relaxed font-light mb-8 relative z-10 max-w-4xl">
-                    {event.summary || "Structured extraction in progress. FINS is analyzing the narrative shift and risk factors compared with the previous filing period."}
-                  </p>
-                  
-                  <div className="flex items-center gap-6 pt-6 border-t border-white/[0.03] relative z-10">
-                    <div className="space-y-1">
-                      <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Action Bias</div>
-                      <div className="text-xs font-bold text-white uppercase tracking-wider">HOLD_ACCUMULATE</div>
-                    </div>
-                    <div className="h-6 w-px bg-white/5" />
-                    <div className="space-y-1">
-                      <div className="text-[9px] font-mono text-white/20 uppercase tracking-widest italic">Confidence</div>
-                      <div className="text-xs font-bold text-[#d8c3a5]">0.89</div>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+          {/* Event Feed: Detailed Agents Insight */}
+          <div className="lg:col-span-8 space-y-10">
+            <div className="text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6 italic">Detailed_Event_Stream</div>
+            <div className="space-y-8 max-h-[800px] overflow-y-auto pr-6 scrollbar-thin scrollbar-thumb-white/5">
+              {data?.disclosureEvents?.map((event, i) => {
+                const signal = data.fusedSignals.find(s => s.disclosure_event_id === event.id);
+                return (
+                    <motion.div
+                        key={event.id}
+                        onClick={() => setSelectedEventId(event.id)}
+                        className={`p-10 border transition-all relative overflow-hidden group cursor-pointer ${
+                            selectedEventId === event.id ? "border-white/20 bg-white/[0.03]" : "border-white/5 bg-white/[0.01] hover:border-white/10"
+                        }`}
+                    >
+                        <div className="flex justify-between items-start mb-8 relative z-10">
+                            <div className="flex items-center gap-6">
+                            <span className="text-[11px] font-mono px-4 py-1.5 bg-white/5 border border-white/10 text-white tracking-[0.2em] uppercase">
+                                {event.filing_type}
+                            </span>
+                            <span className="text-[11px] font-mono text-white/20 uppercase tracking-widest">
+                                {new Date(event.event_timestamp).toLocaleTimeString()}
+                            </span>
+                            </div>
+                            <div className={`text-[11px] font-mono uppercase tracking-[0.2em] flex items-center gap-2 ${
+                                signal?.directional_sentiment === "positive" ? "text-[#93d24a]" : signal?.directional_sentiment === "negative" ? "text-[#ff8362]" : "text-[#d8c3a5]"
+                            }`}>
+                            <div className={`w-2 h-2 rounded-full ${
+                                signal?.directional_sentiment === "positive" ? "bg-[#93d24a] shadow-[0_0_8px_#93d24a]" : signal?.directional_sentiment === "negative" ? "bg-[#ff8362] shadow-[0_0_8px_#ff8362]" : "bg-[#d8c3a5]"
+                            }`} />
+                            Sentiment: {signal?.directional_sentiment || "Neutral"}
+                            </div>
+                        </div>
+                        
+                        <div className="space-y-4 relative z-10 mb-10">
+                            <h3 className="text-4xl font-display font-black tracking-tight text-white uppercase font-outfit">
+                                {event.ticker}: {event.title || "Disclosure Intelligence Hub"}
+                            </h3>
+                            <p className="text-xl text-white/40 leading-relaxed font-cormorant italic max-w-5xl">
+                                "{signal?.causal_summary || "Automated agent segmentation is currently normalizing this filing against prior guidance. Identifying structural changes in risk disclosure and forward-looking sentiment."}"
+                            </p>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 pt-10 border-t border-white/[0.05] relative z-10">
+                            <div className="space-y-2">
+                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">Agent Insight</div>
+                                <div className="text-xs font-bold text-white/70 uppercase leading-relaxed tracking-tight">
+                                    {signal?.comparative_context?.primary_finding as string || "Detected non-material variance in operational hedging language."}
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">Causal Effect</div>
+                                <div className="text-xs font-bold text-[#d8c3a5] uppercase leading-relaxed tracking-tight">
+                                    {signal?.comparative_context?.impact_reasoning as string || "Neutral impact on immediate portfolio posture."}
+                                </div>
+                            </div>
+                            <div className="space-y-2 text-right">
+                                <div className="text-[10px] font-mono text-white/20 uppercase tracking-widest italic">System Confidence</div>
+                                <div className="text-2xl font-display font-black text-white">{(signal?.confidence || 0.81).toFixed(2)}</div>
+                            </div>
+                        </div>
+                    </motion.div>
+                );
+              })}
             </div>
           </div>
         </div>
       </main>
 
-      {/* Stunning Footer Bar */}
-      <footer className="fixed bottom-0 left-0 right-0 h-16 bg-[#020202]/80 backdrop-blur-2xl border-t border-white/[0.05] z-50 flex items-center px-10">
-        <div className="flex items-center gap-12 text-[10px] font-mono tracking-[0.3em] text-white/30 uppercase w-full italic">
-          <div className="flex items-center gap-3 text-[#93d24a]">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#93d24a] shadow-[0_0_8px_#93d24a]" />
-            FINS_SURFACE_ACTIVE
+      <footer className="fixed bottom-0 left-0 right-0 h-16 bg-[#020202]/80 backdrop-blur-3xl border-t border-white/[0.03] z-50 flex items-center px-12">
+        <div className="flex items-center gap-12 text-[11px] font-mono tracking-[0.4em] text-white/20 uppercase w-full italic">
+          <div className="flex items-center gap-4 text-[#93d24a]">
+            <div className="w-2 h-2 rounded-full bg-[#93d24a] shadow-[0_0_10px_#93d24a]" />
+            FINS_OPERATIONAL
           </div>
-          <div className="hidden md:block h-4 w-px bg-white/10" />
-          <span className="hidden md:block">Neural Sync: 100%</span>
-          <span className="hidden md:block">Latency: 12ms</span>
-          <div className="ml-auto flex items-center gap-6">
-            <span className="text-white/10">v2.4.0-STABLE</span>
-            <div className="h-8 w-px bg-white/10" />
-            <span className="text-white/60">Built for Ace Protocol</span>
+          <div className="h-4 w-px bg-white/10" />
+          <span>Real-time Neural Sync Active</span>
+          <div className="ml-auto flex items-center gap-8 text-white/10">
+            <span>ACE_PROTOCOL_V2.4</span>
+            <div className="h-4 w-px bg-white/5" />
+            <span>ENCRYPTED_SESSION_STABLE</span>
           </div>
         </div>
       </footer>
