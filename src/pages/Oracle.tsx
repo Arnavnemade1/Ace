@@ -1,10 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Database, Wifi, Newspaper, RefreshCw, TrendingUp, TrendingDown, Minus, Zap, ChevronDown, ChevronUp, Globe, BarChart3 } from "lucide-react";
 import RegimeDashboard from "@/components/RegimeDashboard";
 import SwarmMindsetControls from "@/components/SwarmMindsetControls";
 import { toast } from "sonner";
+
+/**
+ * ORACLE: Team Command Deck
+ * A high-fidelity control surface for the Ace neural collective.
+ * Design language: Onyx, warm neutrals, zero icons, cinematic motion.
+ */
 
 const STREAMS = [
   "CAPTAIN_BOOTSTRAP_COMPLETE...",
@@ -29,94 +34,53 @@ interface NewsArticle {
   payload: any;
 }
 
-function sentimentColor(score: number | null): string {
-  if (score === null) return "text-white/40";
-  if (score >= 0.4) return "text-[#93d24a]";
-  if (score >= 0.15) return "text-[#b8d86a]";
-  if (score > -0.15) return "text-[#d8c3a5]";
-  if (score > -0.4) return "text-[#e89b6a]";
-  return "text-[#ff6b4a]";
-}
+const sentimentColor = (score: number | null) => {
+  if (score === null) return "text-white/20";
+  if (score >= 0.15) return "text-[#93d24a]";
+  if (score <= -0.15) return "text-[#ff8362]";
+  return "text-[#d8c3a5]";
+};
 
-function sentimentBg(score: number | null): string {
-  if (score === null) return "bg-white/5";
-  if (score >= 0.4) return "bg-[#93d24a]/8";
-  if (score >= 0.15) return "bg-[#93d24a]/5";
-  if (score > -0.15) return "bg-white/3";
-  if (score > -0.4) return "bg-[#ff8362]/5";
-  return "bg-[#ff6b4a]/8";
-}
+const sentimentBorder = (score: number | null) => {
+  if (score === null) return "border-white/5";
+  if (score >= 0.15) return "border-[#93d24a]/20";
+  if (score <= -0.15) return "border-[#ff8362]/20";
+  return "border-white/10";
+};
 
-function sentimentBorder(score: number | null): string {
-  if (score === null) return "border-white/8";
-  if (score >= 0.4) return "border-[#93d24a]/25";
-  if (score >= 0.15) return "border-[#93d24a]/15";
-  if (score > -0.15) return "border-white/10";
-  if (score > -0.4) return "border-[#ff8362]/15";
-  return "border-[#ff6b4a]/25";
-}
-
-function SentimentIcon({ score }: { score: number | null }) {
-  if (score === null) return <Minus className="w-3 h-3 text-white/30" />;
-  if (score >= 0.15) return <TrendingUp className="w-3.5 h-3.5" />;
-  if (score <= -0.15) return <TrendingDown className="w-3.5 h-3.5" />;
-  return <Minus className="w-3 h-3" />;
-}
-
-function timeAgo(dateStr: string | null): string {
+const timeAgo = (dateStr: string | null) => {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return "JUST NOW";
+  if (mins < 60) return `${mins}M AGO`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+  if (hrs < 24) return `${hrs}H AGO`;
+  return `${Math.floor(hrs / 24)}D AGO`;
+};
 
 export default function Oracle() {
   const [logStream, setLogStream] = useState<string[]>([]);
   const [subagents, setSubagents] = useState<any[]>([]);
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastScanInfo, setLastScanInfo] = useState<{ method: string; count: number; overall: number } | null>(null);
-  const [feedExpanded, setFeedExpanded] = useState(true);
   const [feedFilter, setFeedFilter] = useState<"all" | "geopolitics" | "stocks">("all");
   const [visibleCount, setVisibleCount] = useState(10);
 
-  const activeCount = subagents.filter((agent) => agent.status === "active").length;
-  const idleCount = subagents.filter((agent) => agent.status === "idle").length;
-  const errorCount = subagents.filter((agent) => agent.status === "error").length;
-
   const fetchNews = useCallback(async () => {
-    const { data } = await supabase
-      .from("news_articles")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const { data } = await supabase.from("news_articles").select("*").order("created_at", { ascending: false }).limit(50);
     if (data) setNewsArticles(data as unknown as NewsArticle[]);
   }, []);
 
   const triggerSentimentScan = useCallback(async () => {
     setIsRefreshing(true);
-    toast.info("Swarm Sentiment Analyst scanning...");
+    toast.info("SWARM_SENTIMENT_ANALYSIS_INITIALIZED...");
     try {
-      const { data, error } = await supabase.functions.invoke("sentiment-analyst");
-      if (error) throw error;
-      const result = data as any;
-      setLastScanInfo({
-        method: result?.scoring_method || "unknown",
-        count: result?.articles_persisted || 0,
-        overall: result?.sentiment?.overall_score || 0,
-      });
-      toast.success(
-        `Scan complete: ${result?.articles_persisted || 0} articles scored via ${result?.scoring_method || "unknown"}`
-      );
-      // Re-fetch articles
+      await supabase.functions.invoke("sentiment-analyst");
       await fetchNews();
-    } catch (e: any) {
-      console.error("Sentiment scan error:", e);
-      toast.error(`Scan failed: ${e.message || "Unknown error"}`);
+      toast.success("SWARM_SCAN_COMPLETE");
+    } catch (e) {
+      toast.error("SCAN_FAILED");
     } finally {
       setIsRefreshing(false);
     }
@@ -124,7 +88,6 @@ export default function Oracle() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-
     let currentIndex = 0;
     const interval = setInterval(() => {
       setLogStream((prev) => {
@@ -134,32 +97,16 @@ export default function Oracle() {
       });
     }, 3000);
 
-    // Fetch subagent states
     const fetchSubagents = async () => {
-      const { data } = await supabase
-        .from("agent_state")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      const { data } = await supabase.from("agent_state").select("*").order("updated_at", { ascending: false });
       if (data) setSubagents(data);
     };
 
     fetchSubagents();
     fetchNews();
 
-    const subSub = supabase
-      .channel("subagent_updates")
-      .on("postgres_changes", { event: "*", schema: "public", table: "agent_state" }, () => {
-        fetchSubagents();
-      })
-      .subscribe();
-
-    // Real-time news subscription
-    const newsSub = supabase
-      .channel("news_realtime")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "news_articles" }, () => {
-        fetchNews();
-      })
-      .subscribe();
+    const subSub = supabase.channel("subagent_updates").on("postgres_changes", { event: "*", schema: "public", table: "agent_state" }, fetchSubagents).subscribe();
+    const newsSub = supabase.channel("news_realtime").on("postgres_changes", { event: "INSERT", schema: "public", table: "news_articles" }, fetchNews).subscribe();
 
     return () => {
       clearInterval(interval);
@@ -168,402 +115,174 @@ export default function Oracle() {
     };
   }, [fetchNews]);
 
-  // Geopolitics keywords for filtering
   const GEOPOLITICS_KEYWORDS = useMemo(() => /war|conflict|sanction|tariff|nato|china|russia|iran|israel|gaza|ukraine|taiwan|missile|nuclear|troops|military|defense|geopolit|sovereignty|embargo|oil|opec|treaty|alliance|invasion|border|diplomacy|summit|un\b|g7|g20|coup|election|regime/i, []);
   const STOCK_KEYWORDS = useMemo(() => /stock|share|market|bull|bear|rally|crash|earnings|revenue|profit|loss|ipo|nasdaq|s&p|dow|nyse|fed|interest rate|inflation|gdp|unemployment|trade|sector|etf|bond|yield|dividend|buyback|merger|acquisition|\$[A-Z]{1,5}\b/i, []);
 
   const filteredArticles = useMemo(() => {
-    let filtered = newsArticles;
-    if (feedFilter === "geopolitics") {
-      filtered = newsArticles.filter(a => GEOPOLITICS_KEYWORDS.test(`${a.title} ${a.summary || ""}`));
-    } else if (feedFilter === "stocks") {
-      filtered = newsArticles.filter(a => 
-        STOCK_KEYWORDS.test(`${a.title} ${a.summary || ""}`) || 
-        ((a.symbols as unknown as string[]) || []).length > 0
-      );
-    }
-    return filtered;
+    if (feedFilter === "all") return newsArticles;
+    if (feedFilter === "geopolitics") return newsArticles.filter(a => GEOPOLITICS_KEYWORDS.test(`${a.title} ${a.summary || ""}`));
+    return newsArticles.filter(a => STOCK_KEYWORDS.test(`${a.title} ${a.summary || ""}`) || ((a.symbols as unknown as string[]) || []).length > 0);
   }, [newsArticles, feedFilter, GEOPOLITICS_KEYWORDS, STOCK_KEYWORDS]);
 
-  const displayedArticles = filteredArticles.slice(0, visibleCount);
-
-  // Compute aggregate stats from filtered articles
-  const bullishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) >= 0.15).length;
-  const bearishCount = filteredArticles.filter((a) => (a.sentiment_hint ?? 0) <= -0.15).length;
-  const neutralCount = filteredArticles.length - bullishCount - bearishCount;
-  const avgSentiment =
-    filteredArticles.length > 0
-      ? filteredArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / filteredArticles.length
-      : 0;
+  const avgSentiment = filteredArticles.length > 0 ? filteredArticles.reduce((sum, a) => sum + (a.sentiment_hint ?? 0), 0) / filteredArticles.length : 0;
 
   return (
-    <div className="min-h-screen bg-[#101312] text-[#f4efe6] overflow-x-hidden relative">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(206,172,114,0.1),transparent_26%),radial-gradient(circle_at_82%_18%,rgba(107,138,177,0.14),transparent_24%),linear-gradient(180deg,#101312_0%,#0b0d0d_100%)]" />
-      <main className="pt-32 pb-20 relative z-10 px-6">
-        <div className="mx-auto max-w-[92rem]">
-          {/* Top Row: Mission Status & Neural Stream */}
-          <div className="border-t border-white/10 pt-6 mb-14">
-            <div className="grid grid-cols-1 xl:grid-cols-[0.7fr_0.3fr] gap-6">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.32em] text-white/34 mb-4">Oracle</div>
-                <h1 className="text-5xl md:text-7xl font-display tracking-[-0.05em] leading-[0.92] mb-4">
-                  Team Command Deck
-                </h1>
-                <p className="max-w-3xl text-lg leading-8 text-white/58">
-                  Live command surface for the regime engine, adaptive roster, and captain-level coordination logic.
-                </p>
-              </div>
-              <div className="border border-white/8 bg-black/10 p-5 flex flex-col justify-center">
-                <div className="text-[10px] text-white/30 uppercase tracking-[0.24em] mb-3 flex items-center gap-2">
-                  <Wifi className="w-3 h-3 text-[#93d24a]" /> Neural Stream
+    <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-body selection:bg-[#d8c3a5]/30">
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_left,_rgba(216,195,165,0.05),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(147,210,74,0.03),_transparent_40%)]" />
+      </div>
+
+      <main className="pt-32 pb-24 relative z-10 px-10 max-w-[1400px] mx-auto">
+        <header className="border-b border-white/[0.03] pb-12 mb-12 flex flex-col md:flex-row justify-between items-end gap-10">
+          <div className="space-y-4">
+            <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase font-bold">// Strategic Oracle</div>
+            <h1 className="text-6xl md:text-8xl font-display font-black tracking-[-0.05em] leading-[0.85]">
+              Team Command <br /> <span className="text-white/20">Deck.</span>
+            </h1>
+          </div>
+          <div className="w-full md:w-80 border border-white/5 bg-white/[0.01] p-6 space-y-4">
+            <div className="flex items-center justify-between text-[9px] font-mono tracking-widest text-white/20 uppercase">
+              <span>Neural Stream</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#93d24a] animate-pulse" />
+            </div>
+            <div className="space-y-1.5">
+              {logStream.map((log, i) => (
+                <div key={i} className="text-[10px] font-mono text-[#d8c3a5] tracking-tight opacity-40 group-hover:opacity-100 transition-opacity whitespace-nowrap overflow-hidden">
+                  &gt; {log}
                 </div>
-                <div className="space-y-2">
-                  {logStream.map((log, i) => (
-                    <motion.div
-                      key={`${log}-${i}`}
-                      initial={{ opacity: 0, x: 5 }}
-                      animate={{ opacity: 1 - i * 0.25, x: 0 }}
-                      className="text-[11px] tracking-[0.12em] text-[#9bb8d3]"
-                    >
-                      &gt; {log}
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
+              ))}
             </div>
           </div>
+        </header>
 
-          {/* Integrated Dashboard Components */}
-          <div className="grid grid-cols-1 gap-12">
-            <SwarmMindsetControls />
+        <div className="grid grid-cols-1 gap-20">
+          <SwarmMindsetControls />
 
-            {/* ═══════════════════════════════════════════════════════ */}
-            {/* LIVE NEWS FEED WITH AI SENTIMENT                       */}
-            {/* ═══════════════════════════════════════════════════════ */}
-            <section>
-              {/* Header with collapse toggle + filter tabs */}
-              <div className="flex items-center gap-3 mb-4 flex-wrap">
-                <Newspaper className="w-5 h-5 text-[#9bb8d3]" />
-                <h2 className="text-sm tracking-[0.24em] uppercase text-white/50">Live Intel Feed</h2>
-                <div className="h-px flex-1 bg-white/8" />
+          {/* Intelligence Pulse */}
+          <section className="space-y-10">
+            <div className="flex items-end justify-between border-b border-white/[0.03] pb-6">
+              <div className="space-y-1">
+                <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase">Market Intelligence</div>
+                <h2 className="text-3xl font-display font-black tracking-tighter uppercase">Live Intel Feed</h2>
+              </div>
+              <div className="flex gap-4">
+                {(["all", "geopolitics", "stocks"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => { setFeedFilter(tab); setVisibleCount(10); }}
+                    className={`px-4 py-2 text-[9px] font-mono tracking-[0.2em] uppercase border transition-all ${
+                      feedFilter === tab ? "border-[#d8c3a5] bg-[#d8c3a5] text-black" : "border-white/10 text-white/30 hover:border-white/20"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                {/* Filter tabs */}
-                {(["all", "geopolitics", "stocks"] as const).map((tab) => {
-                  const isActive = feedFilter === tab;
-                  const icons = { all: Newspaper, geopolitics: Globe, stocks: BarChart3 };
-                  const Icon = icons[tab];
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => { setFeedFilter(tab); setVisibleCount(10); }}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] border transition-all ${
-                        isActive
-                          ? "border-[#d8c3a5]/40 bg-[#d8c3a5]/12 text-[#d8c3a5]"
-                          : "border-white/8 text-white/30 hover:text-white/50 hover:border-white/15"
-                      }`}
-                    >
-                      <Icon className="w-3 h-3" />
-                      {tab}
-                    </button>
-                  );
-                })}
-
-                {/* Sentiment chips */}
-                <span className="text-[10px] px-2 py-1 border border-[#93d24a]/30 text-[#93d24a] bg-[#93d24a]/8">
-                  ↑ {bullishCount}
-                </span>
-                <span className="text-[10px] px-2 py-1 border border-white/10 text-white/50">
-                  — {neutralCount}
-                </span>
-                <span className="text-[10px] px-2 py-1 border border-[#ff8362]/30 text-[#ff8362] bg-[#ff8362]/10">
-                  ↓ {bearishCount}
-                </span>
-
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+              {/* Sentiment Gauge */}
+              <div className="lg:col-span-4 border border-white/5 bg-white/[0.01] p-8 space-y-8 flex flex-col justify-center">
+                <div className="space-y-2">
+                  <div className="text-[10px] font-mono tracking-[0.3em] text-white/20 uppercase italic">// Swarm Sentiment</div>
+                  <div className={`text-6xl font-display font-black tracking-tighter ${sentimentColor(avgSentiment)}`}>
+                    {avgSentiment >= 0 ? "+" : ""}{avgSentiment.toFixed(3)}
+                  </div>
+                </div>
+                <div className="h-1 w-full bg-white/5 relative overflow-hidden">
+                  <motion.div 
+                    animate={{ left: `${((avgSentiment + 1) / 2) * 100}%` }}
+                    className="absolute top-0 w-1 h-full bg-white shadow-[0_0_10px_white]"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#ff8362] via-white/5 to-[#93d24a] opacity-30" />
+                </div>
+                <button 
                   onClick={triggerSentimentScan}
                   disabled={isRefreshing}
-                  className="flex items-center gap-2 px-3 py-1.5 border border-[#9bb8d3]/30 bg-[#9bb8d3]/8 text-[#9bb8d3] text-[10px] uppercase tracking-[0.2em] hover:bg-[#9bb8d3]/15 transition-colors disabled:opacity-40"
+                  className="w-full py-4 border border-[#d8c3a5]/20 text-[10px] font-mono tracking-[0.3em] uppercase hover:bg-white/5 transition-all disabled:opacity-20"
                 >
-                  <RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`} />
-                  {isRefreshing ? "Scanning..." : "Scan Now"}
-                </motion.button>
-
-                {/* Collapse toggle */}
-                <button
-                  onClick={() => setFeedExpanded(!feedExpanded)}
-                  className="flex items-center gap-1 px-2 py-1 border border-white/8 text-white/30 hover:text-white/50 text-[10px] uppercase tracking-wider transition-colors"
-                >
-                  {feedExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  {feedExpanded ? "Collapse" : "Expand"}
+                  {isRefreshing ? "ANALYZING_SWARM..." : "TRIGGER_SCAN"}
                 </button>
               </div>
 
-              {/* Sentiment Gauge Bar — always visible */}
-              <div className="mb-4 border border-white/8 bg-black/10 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-[#d8c3a5]" />
-                    <span className="text-[10px] uppercase tracking-[0.24em] text-white/40">
-                      {feedFilter === "geopolitics" ? "Geopolitical" : feedFilter === "stocks" ? "Market" : "Swarm"} Sentiment Pulse
-                    </span>
-                    <span className="text-[9px] text-white/20">({filteredArticles.length} articles)</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-lg font-display ${sentimentColor(avgSentiment)}`}>
-                      {avgSentiment >= 0 ? "+" : ""}
-                      {avgSentiment.toFixed(3)}
-                    </span>
-                    {lastScanInfo && (
-                      <span className="text-[9px] text-white/25 tracking-wider">
-                        via {lastScanInfo.method}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="relative h-2 bg-gradient-to-r from-[#ff6b4a] via-[#d8c3a5] to-[#93d24a] rounded-full overflow-hidden">
+              {/* Articles Grid */}
+              <div className="lg:col-span-8 space-y-4 max-h-[600px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/5">
+                {filteredArticles.slice(0, visibleCount).map((article, i) => (
                   <motion.div
-                    className="absolute top-0 w-1 h-full bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.8)]"
-                    animate={{ left: `${((avgSentiment + 1) / 2) * 100}%` }}
-                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
-                  />
-                </div>
-                <div className="flex justify-between mt-1 text-[8px] text-white/20 uppercase tracking-widest">
-                  <span>Extreme Bear</span>
-                  <span>Neutral</span>
-                  <span>Extreme Bull</span>
-                </div>
-              </div>
-
-              {/* Collapsible News Grid */}
-              <AnimatePresence initial={false}>
-                {feedExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                    className="overflow-hidden"
+                    key={article.id}
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className={`p-6 border ${sentimentBorder(article.sentiment_hint)} bg-white/[0.01] hover:bg-white/[0.02] transition-all group`}
                   >
-                    {filteredArticles.length === 0 ? (
-                      <div className="border border-white/8 bg-black/10 p-12 text-center">
-                        <Newspaper className="w-8 h-8 text-white/15 mx-auto mb-3" />
-                        <p className="text-sm text-white/30 mb-4">
-                          {newsArticles.length === 0
-                            ? "No articles yet. Trigger a scan to populate the feed."
-                            : `No ${feedFilter} articles found. Try a different filter or scan again.`}
-                        </p>
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={triggerSentimentScan}
-                          disabled={isRefreshing}
-                          className="px-4 py-2 border border-[#d8c3a5]/30 bg-[#d8c3a5]/8 text-[#d8c3a5] text-xs uppercase tracking-[0.2em] hover:bg-[#d8c3a5]/15 transition-colors"
-                        >
-                          Initialize Swarm Scan
-                        </motion.button>
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex gap-3">
+                        <span className="text-[9px] font-mono px-2 py-1 border border-white/10 text-white/30 uppercase tracking-widest">{article.source}</span>
+                        {article.symbols && (article.symbols as unknown as string[]).slice(0, 2).map(s => (
+                          <span key={s} className="text-[9px] font-mono px-2 py-1 bg-[#d8c3a5]/10 text-[#d8c3a5] tracking-widest">${s}</span>
+                        ))}
                       </div>
-                    ) : (
-                      <>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          <AnimatePresence mode="popLayout">
-                            {displayedArticles.map((article, idx) => (
-                              <motion.div
-                                key={article.id}
-                                initial={{ opacity: 0, y: 12 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ delay: idx * 0.02, duration: 0.3 }}
-                                className={`group relative p-4 border ${sentimentBorder(article.sentiment_hint)} ${sentimentBg(article.sentiment_hint)} hover:bg-white/[0.04] transition-all cursor-default`}
-                              >
-                                <div
-                                  className={`absolute left-0 top-0 bottom-0 w-[2px] ${
-                                    (article.sentiment_hint ?? 0) >= 0.15
-                                      ? "bg-[#93d24a]"
-                                      : (article.sentiment_hint ?? 0) <= -0.15
-                                      ? "bg-[#ff6b4a]"
-                                      : "bg-white/10"
-                                  }`}
-                                />
-                                <div className="flex items-start gap-3 pl-2">
-                                  <div className={`mt-0.5 ${sentimentColor(article.sentiment_hint)}`}>
-                                    <SentimentIcon score={article.sentiment_hint} />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                      <span className="text-[9px] px-1.5 py-0.5 border border-white/10 text-white/35 uppercase tracking-wider">
-                                        {article.source}
-                                      </span>
-                                      {article.symbols && (article.symbols as unknown as string[]).length > 0 &&
-                                        (article.symbols as unknown as string[]).slice(0, 3).map((sym) => (
-                                          <span
-                                            key={sym}
-                                            className="text-[9px] px-1.5 py-0.5 border border-[#9bb8d3]/20 text-[#9bb8d3] bg-[#9bb8d3]/5 font-mono"
-                                          >
-                                            ${sym}
-                                          </span>
-                                        ))}
-                                      <span className="text-[9px] text-white/20 ml-auto whitespace-nowrap">
-                                        {timeAgo(article.published_at || article.created_at)}
-                                      </span>
-                                    </div>
-                                    {article.url ? (
-                                      <a
-                                        href={article.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2 hover:underline"
-                                      >
-                                        {article.title}
-                                      </a>
-                                    ) : (
-                                      <p className="text-sm leading-snug text-white/80 group-hover:text-white transition-colors line-clamp-2">
-                                        {article.title}
-                                      </p>
-                                    )}
-                                    {article.summary && (
-                                      <p className="text-[11px] text-white/30 mt-1 line-clamp-1">{article.summary}</p>
-                                    )}
-                                    <div className="flex items-center gap-3 mt-2">
-                                      <span className={`text-[10px] font-mono ${sentimentColor(article.sentiment_hint)}`}>
-                                        {article.sentiment_hint !== null
-                                          ? `${article.sentiment_hint >= 0 ? "+" : ""}${article.sentiment_hint.toFixed(2)}`
-                                          : "N/A"}
-                                      </span>
-                                      {article.payload?.scored_by && (
-                                        <span className="text-[8px] text-white/15 uppercase tracking-wider">
-                                          {article.payload.scored_by}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </motion.div>
-                            ))}
-                          </AnimatePresence>
-                        </div>
-
-                        {/* Show more / Show less controls */}
-                        <div className="flex items-center justify-center gap-4 mt-4">
-                          {visibleCount < filteredArticles.length && (
-                            <button
-                              onClick={() => setVisibleCount((v) => Math.min(v + 10, filteredArticles.length))}
-                              className="flex items-center gap-2 px-4 py-2 border border-white/10 text-white/40 text-[10px] uppercase tracking-[0.2em] hover:text-white/60 hover:border-white/20 transition-colors"
-                            >
-                              <ChevronDown className="w-3 h-3" />
-                              Show More ({filteredArticles.length - visibleCount} remaining)
-                            </button>
-                          )}
-                          {visibleCount > 10 && (
-                            <button
-                              onClick={() => setVisibleCount(10)}
-                              className="flex items-center gap-2 px-4 py-2 border border-white/10 text-white/40 text-[10px] uppercase tracking-[0.2em] hover:text-white/60 hover:border-white/20 transition-colors"
-                            >
-                              <ChevronUp className="w-3 h-3" />
-                              Collapse
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    )}
+                      <span className="text-[9px] font-mono text-white/10 uppercase tracking-widest">{timeAgo(article.published_at || article.created_at)}</span>
+                    </div>
+                    <a href={article.url || "#"} target="_blank" className="text-lg font-display font-bold tracking-tight text-white/80 group-hover:text-white transition-colors block mb-2">{article.title}</a>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-[10px] font-mono font-bold ${sentimentColor(article.sentiment_hint)}`}>
+                        {article.sentiment_hint !== null ? `${article.sentiment_hint >= 0 ? "+" : ""}${article.sentiment_hint.toFixed(2)}` : "NA"}
+                      </span>
+                      <div className="h-px flex-1 bg-white/[0.03]" />
+                    </div>
                   </motion.div>
-                )}
-              </AnimatePresence>
-            </section>
-
-            {/* Subagent Status Matrix */}
-            <section>
-              <div className="flex items-center gap-3 mb-6 flex-wrap">
-                <Database className="w-5 h-5 text-[#d8c3a5]" />
-                <h2 className="text-sm tracking-[0.24em] uppercase text-white/50">Core Team Pods</h2>
-                <div className="h-px flex-1 bg-white/8" />
-                <span className="text-[10px] px-2 py-1 border border-[#93d24a]/30 text-[#93d24a] bg-[#93d24a]/8">
-                  Active {activeCount}
-                </span>
-                <span className="text-[10px] px-2 py-1 border border-white/10 text-white/50">
-                  Idle {idleCount}
-                </span>
-                <span className="text-[10px] px-2 py-1 border border-[#ff8362]/30 text-[#ff8362] bg-[#ff8362]/10">
-                  Error {errorCount}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {subagents.map((agent) => (
-                  <SubagentCard key={agent.id} agent={agent} />
                 ))}
               </div>
-            </section>
+            </div>
+          </section>
 
-            {/* Dynamic team lifecycle dashboard */}
-            <RegimeDashboard />
-          </div>
+          {/* Subagent Status */}
+          <section className="space-y-10">
+            <div className="text-[10px] font-mono tracking-[0.4em] text-white/20 uppercase border-b border-white/[0.03] pb-6">Core Team Pods</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {subagents.map((agent, i) => (
+                <div key={agent.id} className="p-8 border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all space-y-8">
+                  <div className="flex justify-between items-start">
+                    <span className="text-[9px] font-mono text-white/10 tracking-[0.3em] uppercase">Node_0{i+1}</span>
+                    <div className={`text-[8px] font-mono px-2 py-1 border uppercase tracking-widest ${
+                      agent.status === 'active' ? 'border-[#93d24a]/30 text-[#93d24a]' : agent.status === 'error' ? 'border-[#ff8362]/30 text-[#ff8362]' : 'border-white/10 text-white/30'
+                    }`}>{agent.status}</div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-display font-black tracking-tighter uppercase">{agent.agent_name}</h3>
+                    <p className="text-[10px] text-white/30 leading-relaxed font-light tracking-wide uppercase truncate">"{agent.last_action || "SYNCING..."}"</p>
+                  </div>
+                  <div className="pt-8 border-t border-white/5 grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <div className="text-[8px] font-mono text-white/10 uppercase tracking-widest">Metric</div>
+                      <div className="text-lg font-mono font-bold text-[#d8c3a5] tracking-tight">{agent.metric_value || "0.00"}</div>
+                    </div>
+                    <div className="space-y-1 text-right">
+                      <div className="text-[8px] font-mono text-white/10 uppercase tracking-widest">Mission</div>
+                      <div className="text-[9px] font-mono text-white/40 tracking-widest uppercase truncate">{agent.metric_label || "WAIT"}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <RegimeDashboard />
         </div>
       </main>
 
-      {/* Micro-monologue Stream - Bottom Fixed */}
-      <div className="fixed bottom-0 left-0 right-0 h-10 border-t border-white/8 bg-[#0c0f0f]/80 backdrop-blur-xl z-40 flex items-center px-6 overflow-hidden">
-        <div className="flex items-center gap-6 text-[9px] text-white/30 w-full uppercase tracking-[0.24em]">
-          <span className="flex items-center gap-2 text-[#d8c3a5]">
-            <div className="w-1 h-1 rounded-full bg-[#93d24a] animate-pulse" />
-            NODE_ACE_01: ONLINE
-          </span>
-          <span className="hidden md:flex items-center gap-2">
-            <div className="w-1.5 h-px bg-white/20" />
-            TEAMLINK: PERSISTENT
-          </span>
-          <span className="ml-auto text-white/20 tracking-[0.3em]">SECURE SECTOR 7-G</span>
+      <footer className="fixed bottom-0 left-0 right-0 h-12 bg-[#020202]/80 backdrop-blur-xl border-t border-white/[0.03] flex items-center px-10 z-50">
+        <div className="flex items-center gap-10 w-full text-[9px] font-mono tracking-[0.3em] text-white/20 uppercase">
+          <div className="flex items-center gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#93d24a] shadow-[0_0_8px_#93d24a]" />
+            <span className="text-white/60">NODE_ACE_ONLINE</span>
+          </div>
+          <div className="hidden md:block h-3 w-px bg-white/10" />
+          <span className="hidden md:block">Persistent Link: Stable</span>
+          <span className="ml-auto italic opacity-50">ACE_ORACLE_V2.4</span>
         </div>
-      </div>
+      </footer>
     </div>
-  );
-}
-
-function SubagentCard({ agent }: { agent: any }) {
-  const isError = agent.status === "error";
-  const isActive = agent.status === "active";
-
-  return (
-    <motion.div
-      whileHover={{ y: -4, backgroundColor: "rgba(255,255,255,0.03)" }}
-      className="p-5 border border-white/8 bg-black/10 transition-all relative group overflow-hidden"
-    >
-      <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-        <Brain className="w-12 h-12" />
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] font-mono text-white/40 tracking-wider">0x{agent.id.slice(0, 4)}</span>
-        <div
-          className={`px-2 py-0.5 text-[8px] uppercase border ${
-            isError
-              ? "bg-[#ff8362]/10 text-[#ff8362] border-[#ff8362]/30"
-              : isActive
-              ? "bg-[#93d24a]/10 text-[#93d24a] border-[#93d24a]/30"
-              : "bg-[#9bb8d3]/10 text-[#9bb8d3] border-[#9bb8d3]/30"
-          }`}
-        >
-          {agent.status}
-        </div>
-      </div>
-
-      <h3 className="text-lg font-display text-white mb-1 group-hover:text-[#d8c3a5] transition-colors">
-        {agent.agent_name}
-      </h3>
-      <p className="text-[10px] text-white/30 italic mb-4 truncate">
-        "{agent.last_action || "Synchronizing neural pathways..."}"
-      </p>
-
-      <div className="grid grid-cols-2 gap-2 mt-auto">
-        <div className="p-2 bg-black/30 border border-white/8">
-          <div className="text-[8px] text-white/20 uppercase font-mono">Metric</div>
-          <div className="text-xs font-bold text-[#d8c3a5]">{agent.metric_value || "0.00"}</div>
-        </div>
-        <div className="p-2 bg-black/30 border border-white/8 text-right">
-          <div className="text-[8px] text-white/20 uppercase font-mono">Mission</div>
-          <div className="text-[9px] font-mono text-white/60 truncate">{agent.metric_label || "Wait"}</div>
-        </div>
-      </div>
-    </motion.div>
   );
 }

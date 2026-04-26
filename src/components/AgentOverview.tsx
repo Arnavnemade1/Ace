@@ -1,37 +1,33 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { Eye, Target, Shield, Activity, BarChart3, RefreshCw, TrendingUp, Cpu } from "lucide-react";
-import type { ReactNode } from "react";
 
 interface Agent {
   name: string;
   role: string;
   status: "active" | "idle" | "learning" | "error";
-  icon: ReactNode;
   metric: string;
   metricLabel: string;
 }
 
 const baseAgents = [
-  { name: "Market Scanner", role: "Real-time signal detection across US equities, ETFs & futures", icon: <Eye className="w-5 h-5" /> },
-  { name: "Strategy Engine", role: "Multi-strategy allocation: momentum, mean-reversion, vol-arb", icon: <Target className="w-5 h-5" /> },
-  { name: "Risk Controller", role: "Portfolio-level risk management with dynamic position sizing", icon: <Shield className="w-5 h-5" /> },
-  { name: "Execution Agent", role: "Alpaca paper trading with smart order routing & slippage control", icon: <Activity className="w-5 h-5" /> },
-  { name: "Sentiment Analyst", role: "NLP-driven sentiment from news, filings & social feeds", icon: <BarChart3 className="w-5 h-5" /> },
-  { name: "Causal Replay", role: "Nightly self-improvement: replays decisions, prunes bad patterns", icon: <RefreshCw className="w-5 h-5" /> },
-  { name: "Portfolio Optimizer", role: "Continuous rebalancing with Markowitz-enhanced allocation", icon: <TrendingUp className="w-5 h-5" /> },
-  { name: "Orchestrator", role: "Central coordination, conflict resolution & agent lifecycle mgmt", icon: <Cpu className="w-5 h-5" /> },
+  { name: "Market Scanner", role: "Real-time signal detection across US equities, ETFs & futures" },
+  { name: "Strategy Engine", role: "Multi-strategy allocation: momentum, mean-reversion, vol-arb" },
+  { name: "Risk Controller", role: "Portfolio-level risk management with dynamic position sizing" },
+  { name: "Execution Agent", role: "Alpaca paper trading with smart order routing & slippage control" },
+  { name: "Sentiment Analyst", role: "NLP-driven sentiment from news, filings & social feeds" },
+  { name: "Causal Replay", role: "Nightly self-improvement: replays decisions, prunes bad patterns" },
+  { name: "Portfolio Optimizer", role: "Continuous rebalancing with Markowitz-enhanced allocation" },
+  { name: "Orchestrator", role: "Central coordination, conflict resolution & agent lifecycle mgmt" },
 ];
 
 const statusColors: Record<string, string> = {
-  active: "bg-profit",
-  idle: "bg-muted-foreground",
-  learning: "bg-accent",
-  error: "bg-destructive",
+  active: "bg-emerald-500",
+  idle: "bg-white/20",
+  learning: "bg-cyan-400",
+  error: "bg-amber-500",
 };
 
-// Map numeric placeholders to professional labels
 const formatMetric = (val: string, label: string) => {
   if (val === "0" || !val || val === "-") {
     if (label.toLowerCase().includes("position") || label.toLowerCase().includes("trades")) return "NOMINAL";
@@ -81,7 +77,7 @@ const AgentOverview = () => {
   }, []);
 
   return (
-    <section className="relative py-32 overflow-hidden">
+    <section className="relative py-32 overflow-hidden bg-[#020202]">
       <div className="container mx-auto px-6 relative z-10">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -90,11 +86,11 @@ const AgentOverview = () => {
           transition={{ duration: 0.8 }}
           className="mb-24"
         >
-          <p className="text-[10px] text-primary uppercase tracking-[0.4em] font-mono mb-6">Agent Collective</p>
+          <p className="text-[10px] text-white/20 uppercase tracking-[0.4em] font-mono mb-6 italic">// Collective Intelligence</p>
           <h2 className="text-5xl md:text-7xl font-display font-black tracking-tighter leading-[0.9]">
-            Eight minds.<br />
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#0ea5e9]">
-              One objective.
+            Eight Minds.<br />
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#d8c3a5] to-[#f4efe6]">
+              One Objective.
             </span>
           </h2>
         </motion.div>
@@ -103,32 +99,30 @@ const AgentOverview = () => {
           {agents.map((agent, i) => (
             <motion.div
               key={agent.name}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 10 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}
               transition={{ duration: 0.5, delay: i * 0.06 }}
-              className="group relative p-8 bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all duration-500"
+              className="group relative p-8 border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all duration-500"
             >
-              <div className="flex items-center justify-between mb-8">
-                <div className="text-white/20 group-hover:text-primary transition-colors duration-500">
-                  {agent.icon}
-                </div>
-                <div className="flex items-center gap-2 px-2 py-0.5 rounded-full border border-white/5 bg-black/20">
-                  <div className={`w-1 h-1 rounded-full ${statusColors[agent.status]} animate-pulse`} />
-                  <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono">{agent.status}</span>
+              <div className="flex items-center justify-between mb-12">
+                <div className="text-[9px] font-mono tracking-[0.3em] text-white/10 uppercase">Node_0{i+1}</div>
+                <div className="flex items-center gap-3">
+                  <div className={`w-1.5 h-1.5 rounded-full ${statusColors[agent.status]} shadow-[0_0_8px_currentcolor]`} />
+                  <span className="text-[9px] text-white/30 uppercase tracking-widest font-mono">{agent.status}</span>
                 </div>
               </div>
 
-              <div className="mb-8">
-                <h3 className="text-white font-display font-bold text-lg tracking-tight mb-2 uppercase">{agent.name}</h3>
-                <p className="text-white/30 text-xs leading-relaxed font-light">{agent.role}</p>
+              <div className="mb-12">
+                <h3 className="text-white font-display font-black text-xl tracking-tighter mb-3 uppercase leading-none">{agent.name}</h3>
+                <p className="text-white/30 text-[11px] leading-relaxed font-light tracking-wide uppercase">{agent.role}</p>
               </div>
 
-              <div className="pt-6 border-t border-white/5 flex items-baseline gap-2">
-                <span className="text-2xl font-display font-black text-white tracking-widest">
+              <div className="pt-8 border-t border-white/5 flex items-baseline gap-3">
+                <span className="text-3xl font-display font-black text-white tracking-tighter">
                   {formatMetric(agent.metric, agent.metricLabel)}
                 </span>
-                <span className="text-[9px] text-white/20 uppercase tracking-[0.2em] font-mono">{agent.metricLabel}</span>
+                <span className="text-[9px] text-white/10 uppercase tracking-[0.3em] font-mono">{agent.metricLabel}</span>
               </div>
             </motion.div>
           ))}
