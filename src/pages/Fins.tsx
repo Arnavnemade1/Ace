@@ -125,6 +125,10 @@ export default function Fins() {
                 <h1 className="text-[12rem] md:text-[16rem] font-black tracking-[-0.05em] leading-[0.7] uppercase bg-clip-text text-transparent bg-gradient-to-r from-[#8b5cf6] via-[#ec4899] to-[#10b981] animate-gradient-slow pb-4 relative drop-shadow-[0_0_30px_rgba(139,92,246,0.15)]">
                     FINS<span className="text-white/10">.</span>
                 </h1>
+
+                <p className="text-white/40 text-xl md:text-2xl font-light tracking-tight max-w-3xl italic mt-8 border-l border-white/10 pl-8">
+                    Autonomous neural filtering and real-time corporate disclosure intelligence.
+                </p>
                 
                 {/* Floating HUD Flare */}
                 <div className="absolute top-0 -right-20 flex flex-col gap-1 opacity-20">
