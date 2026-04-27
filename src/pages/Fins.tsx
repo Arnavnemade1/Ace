@@ -127,7 +127,7 @@ export default function Fins() {
                 </h1>
 
                 <p className="text-white/40 text-xl md:text-2xl font-light tracking-tight max-w-3xl italic mt-8 border-l border-white/10 pl-8">
-                    Autonomous neural filtering and real-time corporate disclosure intelligence.
+                    Converting regulatory disclosures into actionable signals for autonomous capital.
                 </p>
                 
                 {/* Floating HUD Flare */}
