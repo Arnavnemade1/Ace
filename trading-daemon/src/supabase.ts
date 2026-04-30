@@ -26,9 +26,9 @@ export async function checkSupabaseConnection(): Promise<{ ok: boolean; error?: 
     }
 }
 
-export async function logAgentAction(agent: string, type: 'info' | 'decision' | 'error' | 'learning' | 'trade', message: string, reasoning?: string, metadata?: any) {
-    if (type === 'info') {
-        // Drop generic info prints from hitting Supabase entirely to save heavy limits
+export async function logAgentAction(agent: string, type: 'info' | 'decision' | 'error' | 'learning' | 'trade' | 'warning', message: string, reasoning?: string, metadata?: any) {
+    if (type === 'info' || type === 'learning') {
+        // Drop low-priority logs to save database space and egress
         return;
     }
 

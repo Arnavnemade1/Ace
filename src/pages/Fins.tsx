@@ -17,23 +17,44 @@ const STREAMS = [
   "EXTRACTING_MATERIAL_SIGNALS",
   "RISK_EVOLUTION_SYNCED",
   "ACE_PROTOCOL_ACTIVE",
+  "SEC_EDGAR_PIPELINE_ONLINE",
+  "INGESTING_REGULATORY_FILINGS",
+  "EARNINGS_SEASON_INTELLIGENCE_ACTIVE",
 ];
 
-const WATCHLIST_MOCK = [
-  { ticker: "MSFT", name: "Microsoft", conviction: "80%" },
-  { ticker: "NVDA", name: "NVIDIA", conviction: "79%" },
-  { ticker: "TSLA", name: "Tesla", conviction: "78%" },
-  { ticker: "AAPL", name: "Apple", conviction: "77%" },
-  { ticker: "AMZN", name: "Amazon", conviction: "76%" },
-  { ticker: "XOM", name: "Exxon Mobil", conviction: "75%" },
-  { ticker: "META", name: "Meta", conviction: "74%" },
-];
+const SEC_FORM_COLORS: Record<string, string> = {
+  "10-K": "#8b5cf6",
+  "10-K/A": "#8b5cf6",
+  "10-Q": "#6366f1",
+  "10-Q/A": "#6366f1",
+  "8-K": "#ec4899",
+  "8-K/A": "#ec4899",
+  "DEF 14A": "#f59e0b",
+  "DEFA14A": "#f59e0b",
+  "4": "#06b6d4",
+  "S-1": "#f97316",
+  "S-1/A": "#f97316",
+  "SC 13D": "#14b8a6",
+  "SC 13G": "#14b8a6",
+};
+
+function isSecFiling(sourceType: string): boolean {
+  return sourceType === "sec_edgar";
+}
+
+function getFilingBadgeColor(filingType: string, sourceType: string): string {
+  if (isSecFiling(sourceType)) {
+    return SEC_FORM_COLORS[filingType] || "#a78bfa";
+  }
+  return "rgba(255,255,255,0.15)";
+}
 
 export default function Fins() {
   const { data, isLoading } = useFinsData();
   const queryClient = useQueryClient();
   const [streamIndex, setStreamIndex] = useState(0);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const autoPrimedRef = useRef(false);
 
   useEffect(() => {
@@ -45,10 +66,17 @@ export default function Fins() {
 
   const triggerSurfaceSync = useCallback(async (reason: "manual" | "auto") => {
     try {
-      await supabase.functions.invoke("fins-surface-sync", { body: { reason } });
+      setSyncing(true);
+      // Trigger both surface sync and SEC ingestor in parallel
+      await Promise.allSettled([
+        supabase.functions.invoke("fins-surface-sync", { body: { reason } }),
+        supabase.functions.invoke("fins-sec-ingestor", { body: { reason } }),
+      ]);
       await queryClient.invalidateQueries({ queryKey: ["fins-dashboard"] });
     } catch (e) {
       console.error("Sync failed", e);
+    } finally {
+      setSyncing(false);
     }
   }, [queryClient]);
 
@@ -65,7 +93,8 @@ export default function Fins() {
     if (!data?.disclosureEvents) return [];
     const seenSnapshots = new Set<string>();
     return data.disclosureEvents.filter((event) => {
-      if (event.filing_type === "MARKET SNAPSHOT") {
+      // Case-insensitive check for market snapshots
+      if (event.filing_type.toLowerCase() === "market snapshot") {
         if (seenSnapshots.has(event.ticker)) return false;
         seenSnapshots.add(event.ticker);
         return true;
@@ -94,6 +123,52 @@ export default function Fins() {
       selectedSignal.comparative_context?.impact_reasoning as string || "Fusing multi-agent context."
     ].slice(0, 3);
   }, [selectedSignal]);
+
+  // Build dynamic watchlist from real company data + latest fused signals
+  const watchlistItems = useMemo(() => {
+    if (!data?.companies) return [];
+
+    return data.companies.map((company) => {
+      // Find the latest fused signal for this company
+      const latestSignal = data.fusedSignals
+        .filter(s => s.ticker === company.ticker)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+      const conviction = latestSignal
+        ? `${Math.round(latestSignal.confidence * 100)}%`
+        : "—";
+
+      // Count SEC filings for this company
+      const secFilingCount = data.disclosureEvents
+        .filter(e => e.ticker === company.ticker && e.source_type === "sec_edgar")
+        .length;
+
+      return {
+        ticker: company.ticker,
+        name: company.company_name || company.ticker,
+        conviction,
+        sentiment: latestSignal?.directional_sentiment || "neutral",
+        secFilingCount,
+        sector: company.sector,
+      };
+    });
+  }, [data]);
+
+  // Count summary stats
+  const secFilingCount = useMemo(() => {
+    return deduplicatedEvents.filter(e => e.source_type === "sec_edgar").length;
+  }, [deduplicatedEvents]);
+
+  const earningsCount = useMemo(() => {
+    return deduplicatedEvents.filter(e => 
+      e.source_type === "sec_edgar" && 
+      (e.filing_type.includes("10-K") || e.filing_type.includes("10-Q") || (e.filing_type === "8-K" && e.title?.toLowerCase().includes("earnings")))
+    ).length;
+  }, [deduplicatedEvents]);
+
+  const surfaceBriefCount = useMemo(() => {
+    return deduplicatedEvents.filter(e => e.source_type !== "sec_edgar").length;
+  }, [deduplicatedEvents]);
 
   return (
     <div className="min-h-screen bg-[#020202] text-[#f4efe6] font-sans selection:bg-[#4ade80]/30 relative overflow-hidden">
@@ -149,6 +224,29 @@ export default function Fins() {
                   </motion.div>
                 </AnimatePresence>
             </div>
+            {/* Data Source Stats */}
+            <div className="flex items-center justify-end gap-6 mt-4 text-[10px] font-mono text-white/25 tracking-widest uppercase">
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#8b5cf6]" />
+                SEC: {secFilingCount}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#ec4899]" />
+                EARNINGS: {earningsCount}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-white/30" />
+                Surface: {surfaceBriefCount}
+              </span>
+            </div>
+            {/* Sync Button */}
+            <button
+              onClick={() => triggerSurfaceSync("manual")}
+              disabled={syncing}
+              className="mt-3 px-5 py-2 border border-white/10 text-[10px] font-mono uppercase tracking-[0.5em] text-white/30 hover:text-white/60 hover:border-white/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {syncing ? "Syncing..." : "Sync_Now"}
+            </button>
           </div>
         </header>
 
@@ -182,15 +280,16 @@ export default function Fins() {
         </section>
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-20">
-          {/* Strategic Universe */}
+          {/* Strategic Universe — Dynamic from real data */}
           <div className="xl:col-span-4 space-y-12">
             <div className="flex items-center justify-between border-b border-white/5 pb-8">
                 <div className="text-[12px] font-mono tracking-[0.5em] text-white/30 uppercase italic font-bold">Strategic_Assets</div>
                 <div className="text-[10px] font-mono text-white/10 uppercase tracking-widest font-bold italic">Neural_Priority</div>
             </div>
             <div className="grid grid-cols-1 gap-4">
-              {WATCHLIST_MOCK.map((company, i) => {
+              {watchlistItems.map((company) => {
                 const isActive = selectedEvent?.ticker === company.ticker;
+                const sentimentColor = company.sentiment === "positive" ? "#4ade80" : company.sentiment === "negative" ? "#f87171" : "rgba(255,255,255,0.2)";
                 return (
                     <motion.div key={company.ticker} onClick={() => setSelectedEventId(data?.disclosureEvents.find(e => e.ticker === company.ticker)?.id || null)}
                         whileHover={{ scale: 1.01, x: 5 }}
@@ -205,10 +304,20 @@ export default function Fins() {
                                     {company.ticker}
                                 </h3>
                                 <p className="text-[10px] font-mono text-white/20 uppercase tracking-[0.4em] font-bold">{company.name}</p>
+                                {company.secFilingCount > 0 && (
+                                  <p className="text-[9px] font-mono text-[#8b5cf6]/60 uppercase tracking-[0.3em]">
+                                    {company.secFilingCount} SEC Filing{company.secFilingCount !== 1 ? "s" : ""}
+                                  </p>
+                                )}
                             </div>
                             <div className="text-right space-y-1">
                                 <div className="text-3xl font-black text-white/80 tracking-tighter">{company.conviction}</div>
-                                <div className="text-[9px] font-mono text-[#10b981] uppercase tracking-widest font-bold">CONVICTION</div>
+                                <div className="text-[9px] font-mono uppercase tracking-widest font-bold" style={{ color: sentimentColor }}>
+                                  CONVICTION
+                                </div>
+                                {company.sector && (
+                                  <div className="text-[8px] font-mono text-white/15 uppercase tracking-widest">{company.sector}</div>
+                                )}
                             </div>
                         </div>
                     </motion.div>
@@ -228,21 +337,44 @@ export default function Fins() {
                 const signal = data?.fusedSignals.find(s => s.disclosure_event_id === event.id);
                 const isSelected = selectedEventId === event.id;
                 const sentimentColor = signal?.directional_sentiment === "positive" ? "#4ade80" : signal?.directional_sentiment === "negative" ? "#f87171" : "rgba(255,255,255,0.2)";
+                const isSec = isSecFiling(event.source_type);
+                const isEarnings = isSec && (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q") || (event.filing_type === "8-K" && event.title?.toLowerCase().includes("earnings")));
+                const badgeColor = getFilingBadgeColor(event.filing_type, event.source_type);
                 
                 return (
                     <motion.div key={event.id} onClick={() => setSelectedEventId(event.id)}
                         whileHover={{ x: 10 }}
                         className={`group relative p-12 border transition-all cursor-pointer backdrop-blur-3xl overflow-hidden ${
                             isSelected ? "bg-white/[0.08] border-white/30 shadow-[0_30px_90px_rgba(0,0,0,0.5)]" : "bg-white/[0.01] border-white/5 hover:border-white/10"
-                        }`}
+                        } ${isEarnings ? "ring-1 ring-[#ec4899]/30" : ""}`}
                     >
+                        {isEarnings && (
+                          <div className="absolute top-0 right-0 px-4 py-1 bg-[#ec4899]/20 border-b border-l border-[#ec4899]/30 text-[#ec4899] text-[9px] font-mono tracking-widest uppercase font-black">
+                            Earnings Report
+                          </div>
+                        )}
                         <div className="absolute left-0 top-0 bottom-0 w-1.5 opacity-60" style={{ backgroundColor: sentimentColor }} />
                         
                         <div className="flex flex-col gap-10 relative z-10">
                             <div className="flex items-center justify-between text-[11px] font-mono">
-                                <div className="flex items-center gap-10">
-                                    <span className="px-5 py-2 border border-white/10 text-white/40 tracking-[0.5em] uppercase font-bold bg-white/5">{event.filing_type}</span>
-                                    <span className="text-white/20 uppercase tracking-[0.5em] font-bold italic">{new Date(event.event_timestamp).toLocaleTimeString()}</span>
+                                <div className="flex items-center gap-6 flex-wrap">
+                                    {/* Filing type badge with SEC-specific styling */}
+                                    <span
+                                      className="px-5 py-2 border text-white/60 tracking-[0.4em] uppercase font-bold"
+                                      style={{
+                                        borderColor: isSec ? `${badgeColor}44` : "rgba(255,255,255,0.1)",
+                                        backgroundColor: isSec ? `${badgeColor}15` : "rgba(255,255,255,0.03)",
+                                        color: isSec ? badgeColor : undefined,
+                                      }}
+                                    >
+                                      {event.filing_type}
+                                    </span>
+                                    {isSec && (
+                                      <span className="px-3 py-1 border border-[#8b5cf6]/20 text-[#8b5cf6]/70 tracking-[0.5em] uppercase font-bold text-[9px] bg-[#8b5cf6]/5">
+                                        SEC EDGAR
+                                      </span>
+                                    )}
+                                    <span className="text-white/20 uppercase tracking-[0.5em] font-bold italic">{new Date(event.event_timestamp).toLocaleDateString()}</span>
                                 </div>
                                 <div className="flex items-center gap-6">
                                     <span className="text-white/50 uppercase tracking-[0.6em] font-black">{event.ticker}</span>
@@ -254,7 +386,7 @@ export default function Fins() {
                                 <h3 className={`text-4xl md:text-5xl font-black uppercase tracking-tighter leading-[1.1] transition-colors ${isSelected ? "text-white" : "text-white/60 group-hover:text-white"}`}>
                                     {event.title || "Neutral Interpretation"}
                                 </h3>
-                                {event.filing_type !== "MARKET SNAPSHOT" && signal?.causal_summary && (
+                                {event.filing_type.toLowerCase() !== "market snapshot" && signal?.causal_summary && (
                                     <p className="text-2xl text-white/30 leading-relaxed max-w-6xl font-light italic pl-10 border-l-2 border-white/5">
                                         "{signal.causal_summary}"
                                     </p>
@@ -271,8 +403,30 @@ export default function Fins() {
                                         <div className="text-[10px] font-mono text-white/20 uppercase tracking-[0.6em] font-bold italic">Directional_Bias</div>
                                         <div className="text-2xl font-black uppercase tracking-[0.1em]" style={{ color: sentimentColor }}>{signal?.directional_sentiment || "Neutral"}</div>
                                     </div>
+                                    {isSec && event.period_end && (
+                                      <div className="space-y-2">
+                                        <div className="text-[10px] font-mono text-white/20 uppercase tracking-[0.6em] font-bold italic">Report_Period</div>
+                                        <div className="text-2xl font-black text-white/40 tracking-tight">{event.period_end}</div>
+                                      </div>
+                                    )}
                                 </div>
-                                <div className="text-[11px] font-mono text-white/10 uppercase tracking-[1em] font-bold italic">SYNC_ACTIVE</div>
+                                <div className="flex items-center gap-6">
+                                  {/* Link to SEC filing */}
+                                  {event.source_url && (
+                                    <a
+                                      href={event.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="px-5 py-2 border border-white/10 text-[10px] font-mono uppercase tracking-[0.5em] text-white/30 hover:text-white/70 hover:border-[#8b5cf6]/40 hover:bg-[#8b5cf6]/10 transition-all"
+                                    >
+                                      {isSec ? "View_Filing ↗" : "Source ↗"}
+                                    </a>
+                                  )}
+                                  <div className="text-[11px] font-mono text-white/10 uppercase tracking-[1em] font-bold italic">
+                                    {isSec ? "SEC_VERIFIED" : "SYNC_ACTIVE"}
+                                  </div>
+                                </div>
                             </div>
                         </div>
                     </motion.div>
@@ -291,6 +445,8 @@ export default function Fins() {
           </div>
           <div className="h-6 w-px bg-white/10" />
           <span>AUTONOMOUS_INTELLIGENCE_STREAM // 24H_CYCLE</span>
+          <div className="h-6 w-px bg-white/10" />
+          <span className="text-[#8b5cf6]/50">SEC_EDGAR_INTEGRATED</span>
           <div className="ml-auto text-white/10 tracking-[1.5em] scale-75 origin-right">ACE_FINS_PROTOCOL_V2.4</div>
         </div>
       </footer>

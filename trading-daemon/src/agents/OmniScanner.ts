@@ -44,7 +44,8 @@ export class OmniScanner {
             this.fetchSauravNews('technology'),
             this.fetchOpenMeteo(),
             this.fetchADSB(),
-            this.fetchSportsArb()
+            this.fetchSportsArb(),
+            this.fetchFinsGlobal()
         ]);
 
         console.log(`[OmniScanner] Ingestion complete. Collected ${((this.results['GLOBAL_NEWS'] || []) as any[]).length} fresh news items.`);
@@ -79,11 +80,15 @@ export class OmniScanner {
         // 3. Traffic Density (Proxy for economic activity/logistics)
         const trafficDensity = (adsb.traffic_density_index || 250) / 500;
 
+        // 4. Earnings Density
+        const finsGlobal = this.results['FINS_GLOBAL'] || { earningsCount: 0 };
+        const earningsActivity = finsGlobal.earningsCount > 5 ? 'High' : (finsGlobal.earningsCount > 0 ? 'Moderate' : 'Low');
+
         return {
             newsSentiment,
             weatherRisk,
             trafficDensity,
-            macroSummary: `Sentiment: ${newsSentiment > 0.6 ? 'Optimistic' : (newsSentiment < 0.4 ? 'Cautions' : 'Stable')} | Weather Risk: ${(weatherRisk * 100).toFixed(0)}% | Logistics: ${(trafficDensity * 100).toFixed(0)}%`,
+            macroSummary: `Sentiment: ${newsSentiment > 0.6 ? 'Optimistic' : (newsSentiment < 0.4 ? 'Cautions' : 'Stable')} | Earnings Activity: ${earningsActivity} | Weather Risk: ${(weatherRisk * 100).toFixed(0)}% | Logistics: ${(trafficDensity * 100).toFixed(0)}%`,
             newsHeadlines: headlines
         };
     }
@@ -237,6 +242,20 @@ export class OmniScanner {
         try {
             const { data } = await axios.get('https://www.balldontlie.io/api/v1/games?per_page=5');
             await this.logToStream('balldontlie', 'SPORTS_ARB', data.data || []);
+        } catch (e) { }
+    }
+
+    private async fetchFinsGlobal() {
+        try {
+            const { data, error } = await supabase
+                .from('fins_disclosure_events')
+                .select('id')
+                .eq('source_type', 'sec_edgar')
+                .or('filing_type.ilike.%10-K%,filing_type.ilike.%10-Q%')
+                .gte('event_timestamp', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()); // Last 7 days
+
+            if (error) throw error;
+            await this.logToStream('OmniScanner', 'FINS_GLOBAL', { earningsCount: data?.length || 0 });
         } catch (e) { }
     }
 }

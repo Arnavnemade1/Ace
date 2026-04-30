@@ -79,6 +79,38 @@ export class StrategyEngine {
         }
     }
 
+    private async getFinsContext(symbol: string) {
+        try {
+            // Fetch recent SEC filings and their fused signal summaries
+            const { data, error } = await supabase
+                .from('fins_disclosure_events')
+                .select(`
+                    filing_type,
+                    title,
+                    event_timestamp,
+                    fins_fused_signals (
+                        causal_summary
+                    )
+                `)
+                .eq('ticker', symbol)
+                .eq('source_type', 'sec_edgar')
+                .order('event_timestamp', { ascending: false })
+                .limit(5);
+
+            if (error) throw error;
+
+            return (data || []).map((e: any) => ({
+                filing_type: e.filing_type,
+                title: e.title,
+                summary: e.fins_fused_signals?.[0]?.causal_summary || 'No detailed analysis available.',
+                event_timestamp: e.event_timestamp
+            }));
+        } catch (e) {
+            console.error(`[Strategy] FINS fetch failed for ${symbol}:`, e);
+            return [];
+        }
+    }
+
     async evaluate(symbols: string[], pulse: any, activeSymbols: Set<string>, account: any, positions: any[]) {
         const signals: any[] = [];
         const BATCH_SIZE = 3; // Reduced batch size due to heavier historical fetching
@@ -104,9 +136,10 @@ export class StrategyEngine {
                     const currentPrice = snapshot[0]?.ClosePrice || 0;
                     if (currentPrice === 0) return;
 
-                    const [technicals, situational] = await Promise.all([
+                    const [technicals, situational, secFilings] = await Promise.all([
                         this.getTechnicals(symbol, currentPrice),
-                        this.getSituationalContext(symbol, currentPrice)
+                        this.getSituationalContext(symbol, currentPrice),
+                        this.getFinsContext(symbol)
                     ]);
 
                     // 2. HeadContext news filtered for symbol
@@ -123,6 +156,7 @@ export class StrategyEngine {
                         },
                         situational,
                         newsHeadlines,
+                        secFilings,
                         portfolio: {
                             cash: account.cash,
                             equity: account.equity,

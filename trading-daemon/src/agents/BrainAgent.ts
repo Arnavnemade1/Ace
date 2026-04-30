@@ -23,6 +23,12 @@ export interface BrainContext {
         isSovereignPriority: boolean;
     };
     newsHeadlines: string[];
+    secFilings: {
+        filing_type: string;
+        title: string;
+        summary: string;
+        event_timestamp: string;
+    }[];
     portfolio: {
         cash: number;
         equity: number;
@@ -64,7 +70,8 @@ Synthesize multi-dimensional market data to identify asymmetric risk/reward oppo
 
 ### 3. SENTIMENT & NEWS CATALYST (weight: 25%)
 - News sentiment score contextualizes market mood. Extreme readings (>0.8 bullish or <0.2 bearish) often signal crowded trades.
-- Check headlines for SPECIFIC catalysts: earnings, FDA approvals, geopolitical events, sector rotation.
+- Check headlines and SEC FILINGS for SPECIFIC catalysts: earnings (10-Q/K), material events (8-K), beneficial ownership (Form 4/SC 13), or leadership shifts.
+- Earnings Reports (10-Q/K) are high-impact. Analyze the summary provided for sentiment shifts, risk adjustments, and financial health.
 - Contrarian edge: when sentiment is extreme but technicals disagree, the contrarian trade often wins.
 
 ### 4. SOVEREIGN PRIORITY ASSESSMENT (weight: 15%)
@@ -121,6 +128,9 @@ Weather/Disruption Risk: ${(Number(context.pulse.weatherRisk) * 100).toFixed(0)}
 
 [RELEVANT HEADLINES]
 ${context.newsHeadlines.length > 0 ? context.newsHeadlines.slice(0, 8).map(h => `• ${h}`).join('\n') : '• No symbol-specific headlines available'}
+
+[SEC FILINGS & MATERIAL DISCLOSURES]
+${context.secFilings.length > 0 ? context.secFilings.map(f => `• [${f.filing_type}] ${f.title}: ${f.summary} (${new Date(f.event_timestamp).toLocaleDateString()})`).join('\n') : '• No recent material filings found.'}
 
 [PORTFOLIO CONTEXT]
 Total Equity: $${Number(context.portfolio.equity).toFixed(2)}
