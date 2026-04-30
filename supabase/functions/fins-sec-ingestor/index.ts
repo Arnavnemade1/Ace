@@ -147,8 +147,8 @@ function classifyFilingSentiment(form: string, items: string): {
     return {
       sentiment: "neutral",
       risk: "stable",
-      confidence: 0.58,
-      summary: `Insider transaction (Form 4) reported. Requires analysis of buy/sell direction and volume.`,
+      confidence: 0.65,
+      summary: `Insider transaction (Form 4) reported. Beneficial ownership shift detected for ${formUpper} filing. Requires direction analysis (P/S).`,
     };
   }
 
@@ -162,13 +162,14 @@ function classifyFilingSentiment(form: string, items: string): {
     };
   }
 
-  // Beneficial ownership
+  // Beneficial ownership (SC 13D/G)
   if (formUpper.includes("SC 13")) {
+    const isD = formUpper.includes("13D");
     return {
       sentiment: "neutral",
-      risk: "stable",
-      confidence: 0.65,
-      summary: `Beneficial ownership report (${form}) filed. Indicates significant stake acquisition or change.`,
+      risk: isD ? "increase" : "stable",
+      confidence: 0.75,
+      summary: `${isD ? "Significant" : "Passive"} stake disclosure (${formUpper}). Indicates major capital positioning shift.`,
     };
   }
 
@@ -313,6 +314,7 @@ serve(async (req) => {
               metadata: {
                 mode: "sec_edgar_ingest",
                 form_type: filing.form,
+                is_insider: filing.form === "4" || filing.form.includes("SC 13"),
                 accession_number: filing.accessionNumber,
                 file_number: filing.fileNumber,
                 items: filing.items,

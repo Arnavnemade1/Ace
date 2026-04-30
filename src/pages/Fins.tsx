@@ -20,7 +20,58 @@ const STREAMS = [
   "SEC_EDGAR_PIPELINE_ONLINE",
   "INGESTING_REGULATORY_FILINGS",
   "EARNINGS_SEASON_INTELLIGENCE_ACTIVE",
+  "INSIDER_INTELLIGENCE_FEED_ACTIVE",
+  "NEURAL_MONOLOGUE_SYNTHESIS_ONLINE",
 ];
+
+const AGENT_PERSONAS = {
+  auditor: {
+    name: "The Auditor",
+    icon: "🔍",
+    color: "#60a5fa",
+    desc: "Precision analysis of financial health & regulatory consistency."
+  },
+  oracle: {
+    name: "The Oracle",
+    icon: "🔮",
+    color: "#a78bfa",
+    desc: "Predictive sentiment synthesis & market narrative mapping."
+  },
+  insider: {
+    name: "The Insider",
+    icon: "👤",
+    color: "#fbbf24",
+    desc: "Deep tracking of executive positioning & beneficial ownership."
+  },
+  guard: {
+    name: "Risk Guard",
+    icon: "🛡️",
+    color: "#f87171",
+    desc: "Material event triage & defensive exposure management."
+  }
+};
+
+const TypewriterText = ({ text, delay = 20 }: { text: string; delay?: number }) => {
+  const [displayedText, setDisplayedText] = useState("");
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    setDisplayedText("");
+    setCurrentIndex(0);
+  }, [text]);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timeout = setTimeout(() => {
+        setDisplayedText(prev => prev + text[currentIndex]);
+        setCurrentIndex(prev => prev + 1);
+      }, delay);
+      return () => clearTimeout(timeout);
+    }
+  }, [currentIndex, text, delay]);
+
+  return <span>{displayedText}</span>;
+};
 
 const SEC_FORM_COLORS: Record<string, string> = {
   "10-K": "#8b5cf6",
@@ -346,7 +397,7 @@ export default function Fins() {
                         whileHover={{ x: 10 }}
                         className={`group relative p-12 border transition-all cursor-pointer backdrop-blur-3xl overflow-hidden ${
                             isSelected ? "bg-white/[0.08] border-white/30 shadow-[0_30px_90px_rgba(0,0,0,0.5)]" : "bg-white/[0.01] border-white/5 hover:border-white/10"
-                        } ${isEarnings ? "ring-1 ring-[#ec4899]/30" : ""}`}
+                        } ${isEarnings ? "ring-1 ring-[#ec4899]/30" : ""} ${ (event.filing_type === "4" || event.filing_type.includes("SC 13")) ? "shadow-[inset_0_0_40px_rgba(251,191,36,0.05)] border-[#fbbf24]/10" : ""}`}
                     >
                         {isEarnings && (
                           <div className="absolute top-0 right-0 px-4 py-1 bg-[#ec4899]/20 border-b border-l border-[#ec4899]/30 text-[#ec4899] text-[9px] font-mono tracking-widest uppercase font-black">
@@ -377,6 +428,24 @@ export default function Fins() {
                                     <span className="text-white/20 uppercase tracking-[0.5em] font-bold italic">{new Date(event.event_timestamp).toLocaleDateString()}</span>
                                 </div>
                                 <div className="flex items-center gap-6">
+                                    <div className="flex items-center gap-3 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
+                                      <span className="text-xs">{
+                                        (() => {
+                                          if (event.source_type === "surface_news") return AGENT_PERSONAS.oracle.icon;
+                                          if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return AGENT_PERSONAS.insider.icon;
+                                          if (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q")) return AGENT_PERSONAS.auditor.icon;
+                                          return AGENT_PERSONAS.guard.icon;
+                                        })()
+                                      }</span>
+                                      <span className="text-[9px] font-mono text-white/40 uppercase tracking-tighter">
+                                        {(() => {
+                                          if (event.source_type === "surface_news") return "Oracle";
+                                          if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return "Insider";
+                                          if (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q")) return "Auditor";
+                                          return "Guard";
+                                        })()}
+                                      </span>
+                                    </div>
                                     <span className="text-white/50 uppercase tracking-[0.6em] font-black">{event.ticker}</span>
                                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sentimentColor, boxShadow: `0 0 20px ${sentimentColor}` }} />
                                 </div>
@@ -387,9 +456,79 @@ export default function Fins() {
                                     {event.title || "Neutral Interpretation"}
                                 </h3>
                                 {event.filing_type.toLowerCase() !== "market snapshot" && signal?.causal_summary && (
-                                    <p className="text-2xl text-white/30 leading-relaxed max-w-6xl font-light italic pl-10 border-l-2 border-white/5">
-                                        "{signal.causal_summary}"
-                                    </p>
+                                    <div className="flex flex-col gap-8">
+                                      <p className="text-2xl text-white/30 leading-relaxed max-w-6xl font-light italic pl-10 border-l-2 border-white/5">
+                                          "{signal.causal_summary}"
+                                      </p>
+                                      
+                                      {isSelected && (
+                                        <motion.div 
+                                          initial={{ opacity: 0, y: 10 }}
+                                          animate={{ opacity: 1, y: 0 }}
+                                          className="relative p-10 bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden group/monologue mt-4"
+                                        >
+                                          {/* Agent Persona Overlay */}
+                                          <div className="absolute top-0 right-0 p-4 opacity-20 group-hover/monologue:opacity-100 transition-opacity">
+                                             <span className="text-4xl">{
+                                              (() => {
+                                                if (event.source_type === "surface_news") return AGENT_PERSONAS.oracle.icon;
+                                                if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return AGENT_PERSONAS.insider.icon;
+                                                if (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q")) return AGENT_PERSONAS.auditor.icon;
+                                                return AGENT_PERSONAS.guard.icon;
+                                              })()
+                                             }</span>
+                                          </div>
+                                          
+                                          <div className="flex flex-col gap-6">
+                                            <div className="flex items-center gap-4">
+                                               <div className="px-3 py-1 bg-white/10 border border-white/20 text-[10px] font-mono tracking-widest text-white/50 uppercase rounded">
+                                                 Neural Monologue // {
+                                                  (() => {
+                                                    if (event.source_type === "surface_news") return AGENT_PERSONAS.oracle.name;
+                                                    if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return AGENT_PERSONAS.insider.name;
+                                                    if (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q")) return AGENT_PERSONAS.auditor.name;
+                                                    return AGENT_PERSONAS.guard.name;
+                                                  })()
+                                                 }
+                                               </div>
+                                               <div className="h-[1px] flex-grow bg-white/10" />
+                                            </div>
+                                            
+                                            <div className="text-xl font-light leading-relaxed text-white/90 italic min-h-[80px]">
+                                               "<TypewriterText text={signal?.causal_summary || "Synthesizing material impact from regulatory data stream..."} />"
+                                            </div>
+
+                                            {/* Insider Activity Tracker (Conditional) */}
+                                            {(event.filing_type === "4" || event.filing_type.includes("SC 13")) && (
+                                              <div className="pt-6 border-t border-white/5 mt-4">
+                                                <div className="flex items-center justify-between mb-4">
+                                                  <span className="text-[10px] font-mono text-[#fbbf24] uppercase tracking-widest font-black">Insider_Pulse_Active</span>
+                                                  <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Ownership Threshold Analysis</span>
+                                                </div>
+                                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                  <motion.div 
+                                                    initial={{ width: 0 }}
+                                                    animate={{ width: `${(signal?.confidence || 0.6) * 100}%` }}
+                                                    className="h-full bg-[#fbbf24]/40" 
+                                                  />
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            <div className="text-[10px] font-mono text-white/20 uppercase tracking-tighter">
+                                               Agent Context: {
+                                                (() => {
+                                                  if (event.source_type === "surface_news") return AGENT_PERSONAS.oracle.desc;
+                                                  if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return AGENT_PERSONAS.insider.desc;
+                                                  if (event.filing_type.includes("10-K") || event.filing_type.includes("10-Q")) return AGENT_PERSONAS.auditor.desc;
+                                                  return AGENT_PERSONAS.guard.desc;
+                                                })()
+                                               }
+                                            </div>
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </div>
                                 )}
                             </div>
 
