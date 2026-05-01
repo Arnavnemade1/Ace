@@ -162,14 +162,14 @@ function classifyFilingSentiment(form: string, items: string): {
     };
   }
 
-  // Beneficial ownership (SC 13D/G)
+  // Beneficial ownership (SC 13D/G) - Whale Activity
   if (formUpper.includes("SC 13")) {
     const isD = formUpper.includes("13D");
     return {
       sentiment: "neutral",
       risk: isD ? "increase" : "stable",
-      confidence: 0.75,
-      summary: `${isD ? "Significant" : "Passive"} stake disclosure (${formUpper}). Indicates major capital positioning shift.`,
+      confidence: 0.88,
+      summary: `${isD ? "Strategic Activist" : "Institutional Passive"} whale positioning (${formUpper}). Significant capital concentration shift detected.`,
     };
   }
 
@@ -314,7 +314,8 @@ serve(async (req) => {
               metadata: {
                 mode: "sec_edgar_ingest",
                 form_type: filing.form,
-                is_insider: filing.form === "4" || filing.form.includes("SC 13"),
+                is_insider: filing.form === "4",
+                is_whale_activity: filing.form.includes("SC 13"),
                 accession_number: filing.accessionNumber,
                 file_number: filing.fileNumber,
                 items: filing.items,

@@ -27,25 +27,25 @@ const STREAMS = [
 const AGENT_PERSONAS = {
   auditor: {
     name: "The Auditor",
-    icon: "🔍",
+    icon: "A",
     color: "#60a5fa",
     desc: "Precision analysis of financial health & regulatory consistency."
   },
   oracle: {
     name: "The Oracle",
-    icon: "🔮",
+    icon: "O",
     color: "#a78bfa",
     desc: "Predictive sentiment synthesis & market narrative mapping."
   },
   insider: {
     name: "The Insider",
-    icon: "👤",
+    icon: "I",
     color: "#fbbf24",
     desc: "Deep tracking of executive positioning & beneficial ownership."
   },
   guard: {
     name: "Risk Guard",
-    icon: "🛡️",
+    icon: "G",
     color: "#f87171",
     desc: "Material event triage & defensive exposure management."
   }
@@ -429,7 +429,7 @@ export default function Fins() {
                                 </div>
                                 <div className="flex items-center gap-6">
                                     <div className="flex items-center gap-3 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
-                                      <span className="text-xs">{
+                                      <span className="text-xs font-mono font-bold">{
                                         (() => {
                                           if (event.source_type === "surface_news") return AGENT_PERSONAS.oracle.icon;
                                           if (event.filing_type === "4" || event.filing_type.includes("SC 13")) return AGENT_PERSONAS.insider.icon;
@@ -498,8 +498,35 @@ export default function Fins() {
                                                "<TypewriterText text={signal?.causal_summary || "Synthesizing material impact from regulatory data stream..."} />"
                                             </div>
 
+                                            {/* Whale Activity Tracker (Conditional) */}
+                                            {event.filing_type.includes("SC 13") && (
+                                              <div className="pt-6 border-t border-white/5 mt-4">
+                                                <div className="flex items-center justify-between mb-4">
+                                                  <span className="text-[10px] font-mono text-[#14b8a6] uppercase tracking-widest font-black">Whale_Watch_Active</span>
+                                                  <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Capital Concentration Analysis</span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                                   <div className="p-4 bg-white/[0.02] border border-white/5 rounded">
+                                                      <div className="text-[8px] font-mono text-white/20 uppercase mb-1">Stake_Intent</div>
+                                                      <div className="text-xs font-bold text-[#14b8a6]">{event.filing_type.includes("13D") ? "ACTIVIST_STRATEGIC" : "INSTITUTIONAL_PASSIVE"}</div>
+                                                   </div>
+                                                   <div className="p-4 bg-white/[0.02] border border-white/5 rounded">
+                                                      <div className="text-[8px] font-mono text-white/20 uppercase mb-1">Concentration_Index</div>
+                                                      <div className="text-xs font-bold text-white">{(signal?.confidence || 0.85).toFixed(2)}_BETA</div>
+                                                   </div>
+                                                </div>
+                                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                  <motion.div 
+                                                    initial={{ width: 0 }}
+                                                    animate={{ width: `${(signal?.confidence || 0.8) * 100}%` }}
+                                                    className="h-full bg-[#14b8a6]/40" 
+                                                  />
+                                                </div>
+                                              </div>
+                                            )}
+
                                             {/* Insider Activity Tracker (Conditional) */}
-                                            {(event.filing_type === "4" || event.filing_type.includes("SC 13")) && (
+                                            {event.filing_type === "4" && (
                                               <div className="pt-6 border-t border-white/5 mt-4">
                                                 <div className="flex items-center justify-between mb-4">
                                                   <span className="text-[10px] font-mono text-[#fbbf24] uppercase tracking-widest font-black">Insider_Pulse_Active</span>
@@ -525,6 +552,13 @@ export default function Fins() {
                                                 })()
                                                }
                                             </div>
+                                            
+                                            {event.filing_type.includes("SC 13") && (
+                                              <div className="flex items-center gap-4 mt-2 px-3 py-2 bg-[#14b8a6]/10 border border-[#14b8a6]/20 rounded">
+                                                <div className="w-2 h-2 rounded-full bg-[#14b8a6] animate-pulse" />
+                                                <span className="text-[9px] font-mono text-[#14b8a6] uppercase tracking-[0.2em] font-black">Whale Positioning Detected</span>
+                                              </div>
+                                            )}
                                           </div>
                                         </motion.div>
                                       )}
