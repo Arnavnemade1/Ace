@@ -16,7 +16,7 @@ That’s it. After launch, you literally just watch it work and improve.
 Core Features (What Makes It Special)
 Fully Autonomous Multi-Agent Swarm 8–12 specialized agents (Data Scout, Energy Analyst, Risk Sentinel, Decision Maker, Executor, etc.) that debate and vote on every decision.
 Live Agent Observatory Real-time streaming of every single step the agents take — the most transparent trading system possible.
-Causal Replay Arena (Breakthrough Feature) Every night it replays the last 24 hours, compares predictions vs actual outcomes, strengthens/weakens causal understanding, and evolves its own reasoning.
+Causal Replay Arena (Breakthrough Feature) Every night  replays the last 24 hours, compares predictions vs actual outcomes, strengthens/weakens causal understanding, and evolves its own reasoning.
 Rich Analytics Dashboard
 Live causal graph visualization
 Agent performance leaderboard
